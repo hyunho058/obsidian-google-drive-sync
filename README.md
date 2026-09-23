@@ -60,7 +60,13 @@ against Google. It just could not do the initial handshake.
 
 ## Installing
 
-No release pipeline yet; copy the build into your vault:
+**From a release (recommended).** Install
+[BRAT](https://github.com/TfTHacker/obsidian42-brat), then *Add beta plugin* →
+`hyunho058/obsidian-google-drive-sync`. BRAT pulls `main.js` and `manifest.json` from
+the latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
+and keeps them updated. This works the same on Mac and iPhone.
+
+**From source.** Copy the build into your vault:
 
 ```bash
 npm install
@@ -71,9 +77,8 @@ mkdir -p "$PLUGIN"
 cp main.js manifest.json "$PLUGIN/"
 ```
 
-Then enable it under Settings → Community plugins. On iOS, the easiest route is
-[BRAT](https://github.com/TfTHacker/obsidian42-brat), or put the same three files in
-the vault's plugin folder via the Files app.
+Then enable it under Settings → Community plugins. On iOS without BRAT, put the same
+files in the vault's plugin folder via the Files app.
 
 ## Conflicts
 
@@ -176,3 +181,16 @@ are reached only through `window.require` inside a desktop-only branch; verify w
 ```bash
 grep -oE 'require\("[a-z_]+"\)' main.js | sort -u   # expect only require("obsidian")
 ```
+
+### Releasing
+
+```bash
+npm version patch   # or minor / major
+git push --follow-tags
+```
+
+`npm version` bumps `package.json`, copies the version into `manifest.json`, records it
+in `versions.json`, commits, and creates a bare tag like `0.1.1` (no `v` — Obsidian
+requires that). Pushing the tag runs `.github/workflows/release.yml`, which checks that
+the tag matches the manifest, runs the tests, builds, checks the bundle for Node
+builtins, and publishes a GitHub release with `main.js` and `manifest.json` attached.

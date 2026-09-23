@@ -1,0 +1,58 @@
+name: Release
+
+# Pushing a tag like `0.1.1` builds the plugin and publishes a GitHub release
+# with the files Obsidian (and BRAT) install from. Obsidian requires the tag to
+# be the bare version, with no `v` prefix.
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tag must match manifest version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          manifest=$(node -p "require('./manifest.json').version")
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::Tag $tag does not match manifest.json version $manifest"
+            exit 1
+          fi
+          node -e "const v=require('./versions.json'); if(!v['$tag']) { console.error('versions.json has no entry for $tag'); process.exit(1) }"
+
+      - run: npm run check
+
+      - run: npm run build
+
+      - name: Bundle must not reference Node builtins
+        run: |
+          # The iOS app has no Node runtime; a static require of anything but
+          # obsidian breaks the plugin on the phone.
+          found=$(grep -oE 'require\("[a-z_]+"\)' main.js | sort -u)
+          echo "$found"
+          if [ "$found" != 'require("obsidian")' ]; then
+            echo "::error::main.js statically requires something other than obsidian"
+            exit 1
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" main.js manifest.json \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
