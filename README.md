@@ -99,6 +99,43 @@ never overwrite each other. Set it under **Devices → Device name**.
 - **Local deletes go to the vault's `.trash`**, not straight to oblivion. Remote
   deletes go to the Drive trash.
 
+## Security model
+
+**What holds your credentials.** The client ID, client secret and refresh token live
+in plaintext in this plugin's `data.json`, inside your vault. Obsidian has no secret
+store, and the phone needs the refresh token locally to mint access tokens. Anyone
+with read access to that file, or to a backup of it, has access to the Drive folder.
+Revoke at <https://myaccount.google.com/permissions>.
+
+That folder is permanently excluded from sync, resolved from the plugin's actual
+install directory at runtime rather than a hardcoded name — a stale guess would
+upload the credentials to Drive and to every linked device.
+
+**The setup token is encoded, not encrypted.** It is base64 and trivially reversible.
+It is a password in transit: it goes through the system clipboard, so clipboard-history
+tools (Raycast, Alfred, Maccy) and macOS Universal Clipboard may retain it. Clear them
+after linking a device.
+
+**Remote filenames are untrusted input.** Google Drive is not a path-based store, and a
+file's `name` may contain `/`, `..` or control characters. Those names become vault
+paths and get written to disk, so every remote path is validated before use; anything
+containing a traversal segment, a control character or a drive letter is skipped and
+reported rather than silently renamed.
+
+**Downloads are verified** against Drive's `md5Checksum` before they touch the vault.
+
+**Uploads are pinned** to `https://*.googleapis.com`. The resumable session URI arrives
+in a response header and then receives your file contents, so it is checked rather than
+followed wherever it points.
+
+**Sign-in.** PKCE (S256) with a random `state` that is verified on return. The loopback
+listener binds to `127.0.0.1` only, on an OS-assigned port, and shuts down as soon as
+the code arrives or after five minutes.
+
+**Enabling `.obsidian` sync has a cost.** This plugin's folder stays excluded, but other
+plugins' `data.json` files do not — several community plugins keep API keys there, and
+turning this on uploads them.
+
 ## Known limits
 
 - **`drive.file` cannot see files it did not create.** A file you upload by hand to

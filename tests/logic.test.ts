@@ -4,9 +4,11 @@ import {
   collisionKey,
   conflictPath,
   folderChain,
+  isSafeVaultPath,
   mimeFor,
   nfc,
 } from "../src/util/paths";
+import { effectiveExcludes } from "../src/settings";
 import { decodeSetupToken, encodeSetupToken } from "../src/auth/setup-token";
 import { md5 } from "../src/util/md5";
 
@@ -76,6 +78,66 @@ ok("** matches nested", filter.excludes("code/deep/node_modules/pkg/index.js"));
 ok("nested folder rule", filter.excludes("Private/Journal/2026-01-01.md"));
 ok("sibling folder not excluded", !filter.excludes("Private/Notes/2026-01-01.md"));
 ok("unrelated path kept", !filter.excludes("notes/meeting.md"));
+
+// --- path traversal ---------------------------------------------------------
+// Drive is not a path-based store: a file's `name` may contain "/" and "..".
+// Those names become vault paths and get written to disk.
+for (const evil of [
+  "../evil.md",
+  "../../../etc/passwd",
+  "notes/../../escape.md",
+  "./x.md",
+  "a/./b.md",
+  "..",
+  "",
+  "C:/Windows/system32",
+  "notes/\u0000.md",
+  "bad\u001fname.md",
+]) {
+  ok(`rejects traversal or control chars: ${JSON.stringify(evil)}`, !isSafeVaultPath(evil));
+}
+
+for (const good of [
+  "notes/meeting.md",
+  `notes/${KOREAN_NFC}.md`,
+  "a/b/c/d.md",
+  "file.with.dots.md",
+  "..hidden-but-fine.md",
+  "folder..name/x.md",
+]) {
+  ok(`accepts ordinary path: ${JSON.stringify(good)}`, isSafeVaultPath(good));
+}
+
+ok("NFD input is judged after normalization", isSafeVaultPath(`notes/${KOREAN_NFD}.md`));
+// Leading slashes are stripped before validation, so this is an ordinary
+// relative path inside the vault rather than an escape.
+check("repeated leading slashes collapse", canonical("//server/share/x"), "server/share/x");
+ok("...and the result is accepted", isSafeVaultPath("//server/share/x"));
+
+// --- credential exclusion ---------------------------------------------------
+// data.json holds the refresh token and client secret. The exclusion must
+// follow wherever the plugin was actually installed, not a hardcoded guess.
+const settingsStub = {
+  exclude: [],
+  syncConfigFolder: true,
+} as unknown as Parameters<typeof effectiveExcludes>[0];
+
+for (const dir of [
+  ".obsidian/plugins/gdrive-vault-sync",
+  ".obsidian/plugins/obsidian-google-drive-sync",
+  ".obsidian/plugins/gdrive-vault-sync-beta",
+  "custom-config/plugins/gdrive-vault-sync",
+]) {
+  const f = new PathFilter(effectiveExcludes(settingsStub, dir));
+  ok(`credentials excluded when installed at ${dir}`, f.excludes(`${dir}/data.json`));
+}
+
+ok(
+  "a sibling plugin's data is not swept up by the rule",
+  !new PathFilter(
+    effectiveExcludes(settingsStub, ".obsidian/plugins/gdrive-vault-sync"),
+  ).excludes(".obsidian/plugins/other-plugin/data.json"),
+);
 
 // --- setup token ------------------------------------------------------------
 const payload = {

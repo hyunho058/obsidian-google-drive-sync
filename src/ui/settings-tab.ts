@@ -2,7 +2,7 @@ import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type GDriveSyncPlugin from "../main";
 import { runLoopbackFlow } from "../auth/loopback";
 import { describeError } from "../util/log";
-import { HARD_EXCLUDES } from "../settings";
+import { effectiveExcludes } from "../settings";
 
 export class GDriveSyncSettingTab extends PluginSettingTab {
   constructor(
@@ -168,8 +168,10 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     new Setting(root)
       .setName("Copy setup token")
       .setDesc(
-        "Copies your credentials and refresh token as one string. Paste it into this " +
-          "plugin on your iPhone to link it without signing in there.",
+        "Copies your credentials and refresh token as one string. It is encoded, not " +
+          "encrypted — treat it like a password. It goes to the system clipboard, so " +
+          "clipboard-history tools and Universal Clipboard may retain it; clear them " +
+          "afterwards.",
       )
       .addButton((b) =>
         b
@@ -260,7 +262,8 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       .setName("Include the .obsidian settings folder")
       .setDesc(
         "This plugin's own folder and per-device workspace layouts stay excluded either " +
-          "way — they hold your refresh token and this device's pane arrangement.",
+          "way. Note that other plugins' data.json files are not — some store API keys, " +
+          "and enabling this uploads them to Drive.",
       )
       .addToggle((t) =>
         t.setValue(this.plugin.settings.syncConfigFolder).onChange(async (v) => {
@@ -284,9 +287,13 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
         });
       });
 
+    const auto = effectiveExcludes(
+      { ...this.plugin.settings, exclude: [] },
+      this.plugin.pluginDir(),
+    );
     root.createEl("div", {
       cls: "setting-item-description",
-      text: `Always excluded: ${HARD_EXCLUDES.join(", ")}`,
+      text: `Always excluded: ${auto.join(", ")}`,
     });
   }
 

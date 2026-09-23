@@ -51,6 +51,23 @@ export function folderChain(path: string): string[] {
 }
 
 /**
+ * Google Drive is not a path-based filesystem: a file's `name` may contain `/`,
+ * `..` or control characters. Those names are turned into vault paths and
+ * written to disk, so an unvetted name is a write outside the vault. Anything
+ * that is not a plain, self-contained relative path is rejected rather than
+ * rewritten — silently renaming an attacker's file would hide the attempt.
+ */
+export function isSafeVaultPath(path: string): boolean {
+  const p = canonical(path);
+  if (p === "" || p.length > 1024) return false;
+  // Control characters, including NUL. Windows drive letters and UNC prefixes.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(p)) return false;
+  if (/^[a-zA-Z]:/.test(p) || p.startsWith("//")) return false;
+  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+/**
  * Glob matcher supporting `*`, `**` and a trailing `/` to mean "this folder
  * and everything under it". Deliberately small — this is user-facing config,
  * not a build tool.

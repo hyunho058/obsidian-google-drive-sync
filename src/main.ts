@@ -30,6 +30,14 @@ export default class GDriveSyncPlugin extends Plugin {
   private localDirty = false;
   private scheduleSync!: ReturnType<typeof debounce>;
 
+  /**
+   * Vault-relative folder this plugin was installed into. Obsidian reports it
+   * on the manifest; the fallback matches Obsidian's own default layout.
+   */
+  pluginDir(): string {
+    return this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+  }
+
   async onload(): Promise<void> {
     await this.loadSettings();
 
@@ -193,7 +201,7 @@ export default class GDriveSyncPlugin extends Plugin {
   // ----------------------------------------------------------------- watchers
 
   private registerVaultWatchers(): void {
-    const filter = () => new PathFilter(effectiveExcludes(this.settings));
+    const filter = () => new PathFilter(effectiveExcludes(this.settings, this.pluginDir()));
 
     const touched = (file: TAbstractFile | string) => {
       const path = canonical(typeof file === "string" ? file : file.path);
@@ -276,7 +284,7 @@ export default class GDriveSyncPlugin extends Plugin {
 
       const { report, index } = await this.engine.run(this.settings.index, {
         deviceName: this.settings.deviceName,
-        exclude: effectiveExcludes(this.settings),
+        exclude: effectiveExcludes(this.settings, this.pluginDir()),
         maxFileBytes: Math.max(1, this.settings.maxFileMB) * 1024 * 1024,
         deletionGuardRatio: this.settings.deletionGuardRatio,
         concurrency: Math.max(1, this.settings.concurrency),

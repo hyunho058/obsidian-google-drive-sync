@@ -34,9 +34,8 @@ export interface Settings {
   lastSync: number;
 }
 
-/** Never synced. data.json here holds the refresh token; workspace files are per-device. */
+/** Never synced. Workspace files are per-device layout, not content. */
 export const HARD_EXCLUDES = [
-  ".obsidian/plugins/gdrive-vault-sync/",
   ".obsidian/workspace.json",
   ".obsidian/workspace-mobile.json",
   ".trash/",
@@ -66,8 +65,14 @@ export const DEFAULT_SETTINGS: Settings = {
   lastSync: 0,
 };
 
-export function effectiveExcludes(s: Settings): string[] {
-  const base = [...HARD_EXCLUDES, ...s.exclude];
+/**
+ * `pluginDir` is resolved at runtime rather than hardcoded. data.json there
+ * holds the refresh token and client secret, and the folder name depends on how
+ * the plugin was installed — a hardcoded guess that misses would upload the
+ * credentials to Drive and to every linked device.
+ */
+export function effectiveExcludes(s: Settings, pluginDir: string): string[] {
+  const base = [...HARD_EXCLUDES, ...s.exclude, `${pluginDir}/`];
   if (!s.syncConfigFolder) base.push(".obsidian/");
   return base;
 }

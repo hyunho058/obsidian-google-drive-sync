@@ -3,7 +3,14 @@ import { DriveClient } from "../drive/client";
 import { RemoteEntry } from "../drive/types";
 import { md5 } from "../util/md5";
 import { Logger, describeError } from "../util/log";
-import { PathFilter, canonical, collisionKey, conflictPath, mimeFor } from "../util/paths";
+import {
+  PathFilter,
+  canonical,
+  collisionKey,
+  conflictPath,
+  isSafeVaultPath,
+  mimeFor,
+} from "../util/paths";
 import { IndexEntry, SyncIndex } from "./state";
 
 export interface EngineOptions {
@@ -22,6 +29,8 @@ export interface SyncReport {
   deletedRemote: number;
   conflicts: string[];
   skipped: string[];
+  /** Remote names that could not be trusted as vault paths. */
+  rejected: string[];
   errors: string[];
   aborted?: string;
 }
@@ -93,11 +102,13 @@ export class SyncEngine {
       deletedRemote: 0,
       conflicts: [],
       skipped: [],
+      rejected: [],
       errors: [],
     };
 
     const local = await this.scanLocal(filter);
-    const { files } = await this.drive.listTree();
+    const { files, rejected } = await this.drive.listTree();
+    report.rejected.push(...rejected);
 
     const remote = new Map<string, RemoteEntry>();
     const collisions = new Map<string, string>();
@@ -274,7 +285,20 @@ export class SyncEngine {
     next: SyncIndex,
     report: SyncReport,
   ): Promise<void> {
+    if (!isSafeVaultPath(path)) {
+      throw new Error(`refusing to write an unsafe path from Drive: ${JSON.stringify(path)}`);
+    }
+
     const data = await this.drive.download(remote.id);
+
+    // Verify what arrived is what Drive said it had, before it touches the vault.
+    const actual = md5(data);
+    if (remote.md5 && actual !== remote.md5) {
+      throw new Error(
+        `checksum mismatch downloading ${path} (expected ${remote.md5}, got ${actual})`,
+      );
+    }
+
     const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 
     this.suppressed.add(path);
@@ -293,7 +317,7 @@ export class SyncEngine {
     const stat = await this.adapter.stat(path);
     next[path] = {
       id: remote.id,
-      md5: remote.md5 ?? md5(data),
+      md5: actual,
       size: stat?.size ?? data.byteLength,
       mtime: stat?.mtime ?? Date.now(),
     };
@@ -335,6 +359,7 @@ export function summarize(report: SyncReport): string {
   if (report.deletedLocal) bits.push(`${report.deletedLocal} removed locally`);
   if (report.conflicts.length) bits.push(`${report.conflicts.length} conflict(s)`);
   if (report.skipped.length) bits.push(`${report.skipped.length} skipped`);
+  if (report.rejected.length) bits.push(`${report.rejected.length} unsafe name(s) blocked`);
   if (report.errors.length) bits.push(`${report.errors.length} error(s)`);
   return bits.length ? `Sync: ${bits.join(", ")}` : "Sync: already up to date";
 }

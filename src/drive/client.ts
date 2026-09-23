@@ -1,6 +1,6 @@
 import { RequestUrlResponse, requestUrl } from "obsidian";
 import { AuthError, TokenManager } from "../auth/oauth";
-import { baseOf, canonical, folderChain, joinPath, nfc } from "../util/paths";
+import { baseOf, canonical, folderChain, isSafeVaultPath, joinPath, nfc } from "../util/paths";
 import { DriveFile, FILE_FIELDS, FOLDER_MIME, RemoteEntry } from "./types";
 
 const API = "https://www.googleapis.com/drive/v3";
@@ -38,6 +38,25 @@ function concatBytes(parts: Uint8Array[]): ArrayBuffer {
     off += p.byteLength;
   }
   return out.buffer;
+}
+
+/**
+ * The resumable upload session URI comes from a response header and then
+ * receives the file's contents, so it is pinned to Google over TLS rather than
+ * followed wherever it points.
+ */
+function assertGoogleEndpoint(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new DriveError("Drive returned an unparseable upload session URI.", 0);
+  }
+  const host = parsed.hostname.toLowerCase();
+  const allowed = host === "googleapis.com" || host.endsWith(".googleapis.com");
+  if (parsed.protocol !== "https:" || !allowed) {
+    throw new DriveError(`Refusing to upload to an unexpected host: ${parsed.origin}`, 0);
+  }
 }
 
 /** Drive query strings are single-quoted; escape backslashes and quotes. */
@@ -232,7 +251,11 @@ export class DriveClient {
    * tree folder by folder, and it rebuilds the path map from scratch on a fresh
    * device.
    */
-  async listTree(): Promise<{ files: RemoteEntry[]; folders: Map<string, string> }> {
+  async listTree(): Promise<{
+    files: RemoteEntry[];
+    folders: Map<string, string>;
+    rejected: string[];
+  }> {
     if (!this.rootId) throw new DriveError("Drive root folder is not configured.", 0);
 
     const all: DriveFile[] = [];
@@ -288,10 +311,16 @@ export class DriveClient {
 
     const files: RemoteEntry[] = [];
     const folders = new Map<string, string>([["", this.rootId]]);
+    const rejected: string[] = [];
 
     for (const f of all) {
       const p = pathOf(f.id);
       if (p === null || p === "") continue;
+      // A Drive name containing `/` or `..` would escape the vault on write.
+      if (!isSafeVaultPath(p)) {
+        rejected.push(p);
+        continue;
+      }
       if (f.mimeType === FOLDER_MIME) {
         folders.set(p, f.id);
         continue;
@@ -306,7 +335,7 @@ export class DriveClient {
     }
 
     this.folderIds = folders;
-    return { files, folders };
+    return { files, folders, rejected };
   }
 
   // -------------------------------------------------------------------- changes
@@ -433,6 +462,7 @@ export class DriveClient {
 
     const session = header(init, "location");
     if (!session) throw new DriveError("Drive did not return a resumable upload session.", init.status);
+    assertGoogleEndpoint(session);
 
     const total = opts.data.byteLength;
     let offset = 0;
