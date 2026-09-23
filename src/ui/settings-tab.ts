@@ -278,7 +278,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       .setDesc("One glob per line. Supports * and **; a trailing / matches a whole folder.")
       .addTextArea((t) => {
         t.inputEl.rows = 6;
-        t.inputEl.style.width = "100%";
+        t.inputEl.addClass("gdvs-full-width");
         t.setValue(this.plugin.settings.exclude.join("\n")).onChange(async (v) => {
           this.plugin.settings.exclude = v
             .split("\n")

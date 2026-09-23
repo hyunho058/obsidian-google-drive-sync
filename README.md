@@ -62,7 +62,7 @@ against Google. It just could not do the initial handshake.
 
 **From a release (recommended).** Install
 [BRAT](https://github.com/TfTHacker/obsidian42-brat), then *Add beta plugin* →
-`hyunho058/obsidian-google-drive-sync`. BRAT pulls `main.js` and `manifest.json` from
+`hyunho058/obsidian-google-drive-sync`. BRAT pulls `main.js`, `manifest.json` and `styles.css` from
 the latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
 and keeps them updated. This works the same on Mac and iPhone.
 
@@ -74,7 +74,7 @@ npm run build
 
 PLUGIN="$HOME/path/to/YourVault/.obsidian/plugins/gdrive-vault-sync"
 mkdir -p "$PLUGIN"
-cp main.js manifest.json "$PLUGIN/"
+cp main.js manifest.json styles.css "$PLUGIN/"
 ```
 
 Then enable it under Settings → Community plugins. On iOS without BRAT, put the same
@@ -126,6 +126,10 @@ file's `name` may contain `/`, `..` or control characters. Those names become va
 paths and get written to disk, so every remote path is validated before use; anything
 containing a traversal segment, a control character or a drive letter is skipped and
 reported rather than silently renamed.
+
+**File access goes through the adapter API.** Obsidian's Vault API only sees files it
+indexes, which leaves out dotfolders such as the config folder. Syncing those when
+asked to means reading and writing through `vault.adapter` instead.
 
 **Downloads are verified** against Drive's `md5Checksum` before they touch the vault.
 
@@ -195,4 +199,4 @@ git push --follow-tags
 in `versions.json`, commits, and creates a bare tag like `0.1.1` (no `v` — Obsidian
 requires that). Pushing the tag runs `.github/workflows/release.yml`, which checks that
 the tag matches the manifest, runs the tests, builds, checks the bundle for Node
-builtins, and publishes a GitHub release with `main.js` and `manifest.json` attached.
+builtins, and publishes a GitHub release with `main.js`, `manifest.json` and `styles.css` attached.

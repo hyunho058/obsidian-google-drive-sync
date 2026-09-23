@@ -1,0 +1,10 @@
+/* Google Drive Vault Sync */
+
+.gdvs-full-width {
+  width: 100%;
+}
+
+.gdvs-token-input {
+  width: 100%;
+  font-family: var(--font-monospace);
+}

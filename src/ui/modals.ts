@@ -12,7 +12,7 @@ export class PasteTokenModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Paste setup token" });
+    this.setTitle("Paste setup token");
     contentEl.createEl("p", {
       text:
         "On your Mac, open this plugin's settings and choose 'Copy setup token'. " +
@@ -21,10 +21,9 @@ export class PasteTokenModal extends Modal {
     });
 
     const input = contentEl.createEl("textarea", {
+      cls: "gdvs-token-input",
       attr: { rows: "6", placeholder: "gdvs1:..." },
     });
-    input.style.width = "100%";
-    input.style.fontFamily = "var(--font-monospace)";
     input.addEventListener("input", () => {
       this.value = input.value;
     });
@@ -60,7 +59,7 @@ export class ConfirmModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: this.titleText });
+    this.setTitle(this.titleText);
     contentEl.createEl("p", { text: this.bodyText });
     new Setting(contentEl)
       .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
