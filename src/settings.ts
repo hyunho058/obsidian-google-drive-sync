@@ -13,7 +13,7 @@ export interface Settings {
   /** Extra user exclusions, one glob per line. */
   exclude: string[];
   /**
-   * Sync `.obsidian/` too. The plugin's own folder and per-device workspace
+   * Sync the vault's config folder (`.obsidian/` by default) too. The plugin's own folder and per-device workspace
    * files stay excluded regardless — they hold the refresh token and this
    * device's pane layout.
    */
@@ -34,14 +34,20 @@ export interface Settings {
   lastSync: number;
 }
 
-/** Never synced. Workspace files are per-device layout, not content. */
-export const HARD_EXCLUDES = [
-  ".obsidian/workspace.json",
-  ".obsidian/workspace-mobile.json",
-  ".trash/",
-  ".git/",
-  ".DS_Store",
-];
+/**
+ * Never synced. Workspace files are per-device layout, not content. The config
+ * folder is whatever the vault says it is — Obsidian lets it be renamed, and a
+ * hardcoded `.obsidian` would leave a renamed one synced.
+ */
+export function hardExcludes(configDir: string): string[] {
+  return [
+    `${configDir}/workspace.json`,
+    `${configDir}/workspace-mobile.json`,
+    ".trash/",
+    ".git/",
+    ".DS_Store",
+  ];
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   clientId: "",
@@ -66,13 +72,13 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /**
- * `pluginDir` is resolved at runtime rather than hardcoded. data.json there
+ * `pluginDir` and `configDir` are resolved at runtime rather than hardcoded. data.json there
  * holds the refresh token and client secret, and the folder name depends on how
  * the plugin was installed — a hardcoded guess that misses would upload the
  * credentials to Drive and to every linked device.
  */
-export function effectiveExcludes(s: Settings, pluginDir: string): string[] {
-  const base = [...HARD_EXCLUDES, ...s.exclude, `${pluginDir}/`];
-  if (!s.syncConfigFolder) base.push(".obsidian/");
+export function effectiveExcludes(s: Settings, pluginDir: string, configDir: string): string[] {
+  const base = [...hardExcludes(configDir), ...s.exclude, `${pluginDir}/`];
+  if (!s.syncConfigFolder) base.push(`${configDir}/`);
   return base;
 }

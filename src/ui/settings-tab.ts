@@ -259,11 +259,12 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     new Setting(root).setName("What gets synced").setHeading();
 
     new Setting(root)
-      .setName("Include the .obsidian settings folder")
+      .setName(`Include the ${this.app.vault.configDir} settings folder`)
       .setDesc(
         "This plugin's own folder and per-device workspace layouts stay excluded either " +
-          "way. Note that other plugins' data.json files are not — some store API keys, " +
-          "and enabling this uploads them to Drive.",
+          "way. Everything else is not: other plugins' data.json files, some of which " +
+          "store API keys, are uploaded to Drive, and other plugins' code is synced too — " +
+          "so any linked device can change the plugins running on every other one.",
       )
       .addToggle((t) =>
         t.setValue(this.plugin.settings.syncConfigFolder).onChange(async (v) => {
@@ -290,6 +291,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     const auto = effectiveExcludes(
       { ...this.plugin.settings, exclude: [] },
       this.plugin.pluginDir(),
+      this.app.vault.configDir,
     );
     root.createEl("div", {
       cls: "setting-item-description",

@@ -9,6 +9,7 @@ import {
   nfc,
 } from "../src/util/paths";
 import { effectiveExcludes } from "../src/settings";
+import { escapeHtml } from "../src/auth/loopback";
 import { decodeSetupToken, encodeSetupToken } from "../src/auth/setup-token";
 import { md5 } from "../src/util/md5";
 
@@ -128,15 +129,43 @@ for (const dir of [
   ".obsidian/plugins/gdrive-vault-sync-beta",
   "custom-config/plugins/gdrive-vault-sync",
 ]) {
-  const f = new PathFilter(effectiveExcludes(settingsStub, dir));
+  const f = new PathFilter(effectiveExcludes(settingsStub, dir, dir.split("/")[0]));
   ok(`credentials excluded when installed at ${dir}`, f.excludes(`${dir}/data.json`));
 }
 
 ok(
   "a sibling plugin's data is not swept up by the rule",
   !new PathFilter(
-    effectiveExcludes(settingsStub, ".obsidian/plugins/gdrive-vault-sync"),
+    effectiveExcludes(settingsStub, ".obsidian/plugins/gdrive-vault-sync", ".obsidian"),
   ).excludes(".obsidian/plugins/other-plugin/data.json"),
+);
+
+// --- config folder exclusion ------------------------------------------------
+// Obsidian lets the config folder be renamed. With config sync off, a renamed
+// folder must still be excluded — other plugins' secrets and code live there.
+{
+  const off = { exclude: [], syncConfigFolder: false } as unknown as typeof settingsStub;
+  const f = new PathFilter(
+    effectiveExcludes(off, ".obsidian-mobile/plugins/gdrive-vault-sync", ".obsidian-mobile"),
+  );
+  ok("renamed config folder excluded when config sync is off", f.excludes(".obsidian-mobile/plugins/other/data.json"));
+  ok("...including its plugin code", f.excludes(".obsidian-mobile/plugins/other/main.js"));
+  ok("...without excluding an unrelated .obsidian folder by name", !f.excludes(".obsidian/notes.md"));
+
+  const on = new PathFilter(
+    effectiveExcludes(settingsStub, ".obsidian-mobile/plugins/gdrive-vault-sync", ".obsidian-mobile"),
+  );
+  ok("renamed config folder's workspace layout always excluded", on.excludes(".obsidian-mobile/workspace.json"));
+  ok("renamed config folder syncs when config sync is on", !on.excludes(".obsidian-mobile/app.json"));
+}
+
+// --- sign-in page -----------------------------------------------------------
+// The loopback page echoes Google's `error` query parameter, which anyone who
+// finds the port can set.
+check(
+  "sign-in page escapes markup",
+  escapeHtml(`<script>alert("x")</script>&'`),
+  "&#60;script&#62;alert(&#34;x&#34;)&#60;/script&#62;&#38;&#39;",
 );
 
 // --- setup token ------------------------------------------------------------

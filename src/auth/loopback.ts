@@ -58,10 +58,15 @@ function openExternal(url: string): void {
   window.open(url, "_blank");
 }
 
+/** `detail` can carry query-string input from whoever hit the port, so it is escaped. */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
 const PAGE = (title: string, detail: string) =>
-  `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+  `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title>` +
   `<body style="font-family:-apple-system,system-ui,sans-serif;max-width:32rem;margin:6rem auto;padding:0 1.5rem;line-height:1.6">` +
-  `<h1 style="font-size:1.25rem">${title}</h1><p style="color:#555">${detail}</p></body>`;
+  `<h1 style="font-size:1.25rem">${escapeHtml(title)}</h1><p style="color:#555">${escapeHtml(detail)}</p></body>`;
 
 export interface LoopbackResult {
   refreshToken: string;

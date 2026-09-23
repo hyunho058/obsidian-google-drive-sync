@@ -137,9 +137,11 @@ followed wherever it points.
 listener binds to `127.0.0.1` only, on an OS-assigned port, and shuts down as soon as
 the code arrives or after five minutes.
 
-**Enabling `.obsidian` sync has a cost.** This plugin's folder stays excluded, but other
+**Enabling config-folder sync has a cost.** This plugin's folder stays excluded, but other
 plugins' `data.json` files do not — several community plugins keep API keys there, and
-turning this on uploads them.
+turning this on uploads them. Plugin code syncs too, so any linked device can change
+the plugins that run on every other one. The config folder is read from the vault
+rather than assumed to be `.obsidian`, so a renamed one is excluded the same way.
 
 ## Known limits
 

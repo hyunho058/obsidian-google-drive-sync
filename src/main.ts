@@ -201,7 +201,7 @@ export default class GDriveSyncPlugin extends Plugin {
   // ----------------------------------------------------------------- watchers
 
   private registerVaultWatchers(): void {
-    const filter = () => new PathFilter(effectiveExcludes(this.settings, this.pluginDir()));
+    const filter = () => new PathFilter(effectiveExcludes(this.settings, this.pluginDir(), this.app.vault.configDir));
 
     const touched = (file: TAbstractFile | string) => {
       const path = canonical(typeof file === "string" ? file : file.path);
@@ -284,7 +284,7 @@ export default class GDriveSyncPlugin extends Plugin {
 
       const { report, index } = await this.engine.run(this.settings.index, {
         deviceName: this.settings.deviceName,
-        exclude: effectiveExcludes(this.settings, this.pluginDir()),
+        exclude: effectiveExcludes(this.settings, this.pluginDir(), this.app.vault.configDir),
         maxFileBytes: Math.max(1, this.settings.maxFileMB) * 1024 * 1024,
         deletionGuardRatio: this.settings.deletionGuardRatio,
         concurrency: Math.max(1, this.settings.concurrency),
