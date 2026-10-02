@@ -143,8 +143,9 @@ export default class GDriveSyncPlugin extends Plugin {
     new Notice("Setup token copied. Paste it into this plugin's settings on your other device.");
   }
 
-  promptForSetupToken(): void {
-    new PasteTokenModal(this.app, (raw) => void this.applySetupToken(raw)).open();
+  /** `onDone` runs after the token is applied or rejected, e.g. to redraw settings. */
+  promptForSetupToken(onDone?: () => void): void {
+    new PasteTokenModal(this.app, (raw) => void this.applySetupToken(raw).then(onDone)).open();
   }
 
   async applySetupToken(raw: string): Promise<void> {

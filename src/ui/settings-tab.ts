@@ -45,6 +45,11 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
   }
 
   private renderCredentials(root: HTMLElement): void {
+    if (!Platform.isDesktopApp) {
+      this.renderMobileLink(root);
+      return;
+    }
+
     new Setting(root).setName("Google credentials").setHeading();
 
     const help = root.createEl("div", { cls: "setting-item-description" });
@@ -89,42 +94,64 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
         });
       });
 
-    if (Platform.isDesktopApp) {
-      new Setting(root)
-        .setName("Sign in with Google")
-        .setDesc(
-          "Opens your browser and listens on 127.0.0.1 for the redirect. Google rejects " +
-            "obsidian:// redirects, so this step only works on desktop.",
-        )
-        .addButton((b) =>
-          b
-            .setButtonText(this.plugin.settings.refreshToken ? "Sign in again" : "Sign in")
-            .setCta()
-            .onClick(() => void this.signIn()),
-        );
-    } else {
-      new Setting(root)
-        .setName("Sign in")
-        .setDesc(
-          "Interactive sign-in is not possible on this platform — iOS cannot open a " +
-            "loopback listener. Sign in on your Mac, then paste the setup token below.",
-        );
-    }
+    new Setting(root)
+      .setName("Sign in with Google")
+      .setDesc(
+        "Opens your browser and listens on 127.0.0.1 for the redirect. Google rejects " +
+          "obsidian:// redirects, so this step only works on desktop.",
+      )
+      .addButton((b) =>
+        b
+          .setButtonText(this.plugin.settings.refreshToken ? "Sign in again" : "Sign in")
+          .setCta()
+          .onClick(() => void this.signIn()),
+      );
 
-    if (this.plugin.settings.refreshToken) {
-      new Setting(root)
-        .setName("Sign out")
-        .setDesc("Clears the stored token on this device only.")
-        .addButton((b) =>
-          b
-            .setButtonText("Sign out")
-            .setWarning()
-            .onClick(async () => {
-              await this.plugin.signOut();
-              this.display();
-            }),
+    this.renderSignOut(root);
+  }
+
+  /**
+   * Phones cannot run the Google sign-in (no loopback listener), so the only way
+   * in is a setup token from a desktop. The client ID and secret arrive inside
+   * that token, so the fields for typing them are desktop-only.
+   */
+  private renderMobileLink(root: HTMLElement): void {
+    new Setting(root).setName("Google account").setHeading();
+
+    const linked = this.plugin.isLinked();
+    new Setting(root)
+      .setName(linked ? "Linked" : "Link this device")
+      .setDesc(
+        linked
+          ? "This device syncs with your Google Drive folder. To link it again, paste a " +
+              "new setup token."
+          : "Phones cannot sign in to Google directly. On your computer, open this " +
+              "plugin's settings and choose 'Copy setup token', then paste it here.",
+      )
+      .addButton((b) => {
+        b.setButtonText(linked ? "Paste new token" : "Paste setup token").onClick(() =>
+          this.plugin.promptForSetupToken(() => this.display()),
         );
-    }
+        if (!linked) b.setCta();
+      });
+
+    this.renderSignOut(root);
+  }
+
+  private renderSignOut(root: HTMLElement): void {
+    if (!this.plugin.settings.refreshToken) return;
+    new Setting(root)
+      .setName("Sign out")
+      .setDesc("Clears the stored token on this device only.")
+      .addButton((b) =>
+        b
+          .setButtonText("Sign out")
+          .setWarning()
+          .onClick(async () => {
+            await this.plugin.signOut();
+            this.display();
+          }),
+      );
   }
 
   private async signIn(): Promise<void> {
@@ -180,10 +207,15 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
           .onClick(() => void this.plugin.copySetupToken()),
       );
 
-    new Setting(root)
-      .setName("Paste setup token")
-      .setDesc("Link this device using a token copied from another one.")
-      .addButton((b) => b.setButtonText("Paste").onClick(() => this.plugin.promptForSetupToken()));
+    // On a phone this lives at the top of the page, where signing in would be.
+    if (Platform.isDesktopApp) {
+      new Setting(root)
+        .setName("Paste setup token")
+        .setDesc("Link this device using a token copied from another one.")
+        .addButton((b) =>
+          b.setButtonText("Paste").onClick(() => this.plugin.promptForSetupToken(() => this.display())),
+        );
+    }
   }
 
   private renderSyncBehaviour(root: HTMLElement): void {
