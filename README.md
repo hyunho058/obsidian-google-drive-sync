@@ -49,16 +49,42 @@ iOS cannot complete an OAuth sign-in. There is no way around this: Google reject
 `obsidian://` redirect URIs for every client type, and iOS cannot open the loopback
 listener that the desktop flow uses. So the credentials travel from the Mac instead.
 
-1. On the Mac: settings → **Copy setup token**.
-2. Get that string to your phone (AirDrop, Notes, a password manager — it grants
-   access to the Drive folder, so do not put it somewhere public).
+1. On the Mac: settings → **Copy setup token** → **Copy token**. Only after the token
+   is on the clipboard does the window show a one-time code such as `K7Q4-ZP9M`.
+   Leave that window open.
+2. Get the token to your phone (Universal Clipboard or AirDrop). It is encrypted, so
+   it is useless without the code, but there is no reason to post it anywhere.
 3. On the iPhone: install and enable the plugin, then settings → **Paste setup
-   token**. It links and runs a first sync.
+   token**. Paste the token, type the code (case, spaces and dashes don't matter),
+   and tap **Link this device**. The plugin checks the sign-in with Google, saves
+   it, and runs a first sync. A mistyped code just asks you to type it again.
 
 After this the phone is a full peer — it refreshes its own access tokens directly
 against Google. It just could not do the initial handshake.
 
+Both devices must run version 0.2.0 or later: older versions cannot read the
+encrypted token, and the new version refuses the old unencrypted kind.
+
+### Updating the plugin on the iPhone
+
+Without BRAT, updating the phone means replacing its vault folder, which also
+replaces this plugin's settings file, so the phone has to be linked again:
+
+1. Update the Mac first and restart Obsidian on it once.
+2. Copy a folder that contains only the plugin
+   (`.obsidian/plugins/gdrive-vault-sync/` with `main.js`, `manifest.json` and
+   `styles.css`, plus `.obsidian/community-plugins.json`) onto the phone. Never copy
+   the Mac's own vault folder: for one start after an update its settings file can
+   still hold the old plaintext sign-in.
+3. Link again with a new setup token and code, as above. Your notes come back down
+   from Drive; nothing is deleted.
+
+The previous sign-in stays behind in Obsidian's app storage on the phone, outside the
+vault. Obsidian offers no way to delete it, and the plugin never reads it again.
+
 ## Installing
+
+Requires Obsidian 1.11.4 or later (for its secure storage) on every device.
 
 **From a release (recommended).** Install
 [BRAT](https://github.com/TfTHacker/obsidian42-brat), then *Add beta plugin* →
@@ -99,27 +125,40 @@ never overwrite each other. Set it under **Devices → Device name**.
   sync stops without changing anything and tells you. This is what stops a folder
   trashed in Drive, or a vault that has not finished hydrating on the phone, from
   propagating as a mass delete. Adjustable under Advanced.
-- **Credentials are never synced.** `.obsidian/plugins/gdrive-vault-sync/` is
-  permanently excluded, so the refresh token in `data.json` stays on each device.
+- **Credentials are never synced.** The client secret and refresh token are kept in
+  Obsidian's secure storage, outside the vault, on each device. This plugin's own
+  folder is also permanently excluded, since its `data.json` still holds the Drive
+  folder id and sync records.
 - **Local deletes go to the vault's `.trash`**, not straight to oblivion. Remote
   deletes go to the Drive trash.
 
 ## Security model
 
-**What holds your credentials.** The client ID, client secret and refresh token live
-in plaintext in this plugin's `data.json`, inside your vault. Obsidian has no secret
-store, and the phone needs the refresh token locally to mint access tokens. Anyone
-with read access to that file, or to a backup of it, has access to the Drive folder.
-Revoke at <https://myaccount.google.com/permissions>.
+**What holds your credentials.** The client secret and refresh token are kept in
+Obsidian's secure storage (`SecretStorage`, Obsidian 1.11.4 and later): per device and
+outside the vault folder, so copying, backing up or syncing the vault never carries
+them. Obsidian does not document whether that storage is encrypted on disk, so treat
+it as "out of the vault", not as "encrypted". It is also shared with other installed
+plugins, which could already read this plugin's settings file before. The client ID
+is not a secret and stays in `data.json`. Anyone who gets the refresh token has access
+to the Drive folder; revoke it at <https://myaccount.google.com/permissions>.
 
-That folder is permanently excluded from sync, resolved from the plugin's actual
-install directory at runtime rather than a hardcoded name — a stale guess would
-upload the credentials to Drive and to every linked device.
+Older versions kept these secrets in plaintext in `data.json`. Updating moves them in
+two steps: the first start copies them into secure storage, and the next start
+removes them from `data.json` once it finds them stored. Until then the old copy is
+still used, so sync never stops.
 
-**The setup token is encoded, not encrypted.** It is base64 and trivially reversible.
-It is a password in transit: it goes through the system clipboard, so clipboard-history
-tools (Raycast, Alfred, Maccy) and macOS Universal Clipboard may retain it. Clear them
-after linking a device.
+This plugin's folder is permanently excluded from sync anyway, resolved from its
+actual install directory at runtime rather than a hardcoded name.
+
+**The setup token is encrypted.** It is AES-256-GCM, keyed by PBKDF2-SHA256 (600,000
+rounds) from an 8-character one-time code. The code is shown only on the copying
+device's screen and never goes to the clipboard, so a token left in clipboard history
+or a message is useless on its own. Trying every code against a leaked token takes
+roughly two years on one high-end GPU, less with more GPUs. Tokens do not expire: if
+one leaks together with its code, revoke access at
+<https://myaccount.google.com/permissions> and link again. Old unencrypted tokens
+(`gdvs1:`) are refused.
 
 **Remote filenames are untrusted input.** Google Drive is not a path-based store, and a
 file's `name` may contain `/`, `..` or control characters. Those names become vault
@@ -170,6 +209,9 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 | "Google returned no refresh token" | The app is already authorized. Revoke it at <https://myaccount.google.com/permissions> and sign in again. |
 | Sync stopped with a deletion warning | The guard fired. Check both sides; if it was intentional, run **Reset sync state**. |
 | Duplicate-looking Korean/Japanese filenames | Should not happen — paths are normalized to NFC on both sides. Report it if it does. |
+| "This device's sign-in is missing" | Obsidian's app storage was cleared (e.g. a reinstall). Notes are untouched; sign in again on desktop, or paste a new setup token on the phone. |
+| "That code doesn't match this token" | The code was mistyped, or it belongs to a different copy. Type it again, or copy a new token. |
+| "This is an old, unencrypted setup token" | The copying device runs a version before 0.2.0. Update it and copy a new token. |
 
 Turn on **Verbose logging** in Advanced for per-file detail in the developer console.
 
@@ -177,7 +219,7 @@ Turn on **Verbose logging** in Advanced for per-file detail in the developer con
 
 ```bash
 npm run dev     # watch build
-npm test        # pure-logic tests (paths, globs, conflicts, setup token, md5)
+npm test        # pure-logic tests (paths, globs, conflicts, setup token, credential store, md5)
 npm run check   # typecheck + tests
 ```
 

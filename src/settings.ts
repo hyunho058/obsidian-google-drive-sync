@@ -2,8 +2,23 @@ import { SyncIndex, emptyIndex } from "./sync/state";
 
 export interface Settings {
   clientId: string;
+  /**
+   * Legacy plaintext copies. Secrets now live in Obsidian's SecretStorage; these
+   * are only read during migration from older versions, then blanked.
+   */
   clientSecret: string;
   refreshToken: string;
+  /**
+   * Random suffix for this vault's SecretStorage ids. Keeps two vaults on one
+   * device from sharing secrets if the store turns out not to be per-vault.
+   */
+  secretIdSuffix: string;
+  /**
+   * True once this device has been linked (setup token, desktop sign-in, or a
+   * migrated refresh token) and until it signs out. Lets a lost sign-in be told
+   * apart from a device that was never linked or chose to sign out.
+   */
+  linked: boolean;
 
   rootFolderName: string;
   rootFolderId: string;
@@ -53,6 +68,8 @@ export const DEFAULT_SETTINGS: Settings = {
   clientId: "",
   clientSecret: "",
   refreshToken: "",
+  secretIdSuffix: "",
+  linked: false,
   rootFolderName: "",
   rootFolderId: "",
   deviceName: "",

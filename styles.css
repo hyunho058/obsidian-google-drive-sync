@@ -8,3 +8,28 @@
   width: 100%;
   font-family: var(--font-monospace);
 }
+
+.gdvs-code-input {
+  width: 100%;
+  margin-top: var(--size-4-2);
+  font-family: var(--font-monospace);
+  letter-spacing: 0.1em;
+}
+
+.gdvs-code-display {
+  margin: var(--size-4-3) 0;
+  font-family: var(--font-monospace);
+  font-size: 2em;
+  letter-spacing: 0.15em;
+  text-align: center;
+  user-select: none;
+}
+
+.gdvs-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.gdvs-error:empty {
+  display: none;
+}

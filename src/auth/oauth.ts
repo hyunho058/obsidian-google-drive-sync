@@ -11,7 +11,8 @@ export interface Credentials {
 }
 
 export class AuthError extends Error {
-  constructor(message: string, readonly fatal: boolean) {
+  /** `status` is the HTTP status when Google answered with an error. */
+  constructor(message: string, readonly fatal: boolean, readonly status?: number) {
     super(message);
     this.name = "AuthError";
   }
@@ -54,9 +55,10 @@ async function postToken(params: Record<string, string>): Promise<TokenResponse>
           "OAuth consent screen still in Testing status — those refresh tokens expire " +
           "after 7 days. Set the consent screen to In production, then sign in again.",
         true,
+        res.status,
       );
     }
-    throw new AuthError(`Token request failed (${res.status}): ${code} ${desc}`.trim(), false);
+    throw new AuthError(`Token request failed (${res.status}): ${code} ${desc}`.trim(), false, res.status);
   }
 
   return res.json as TokenResponse;
@@ -86,6 +88,62 @@ export async function exchangeCode(opts: {
     );
   }
   return tokens.refresh_token;
+}
+
+export type VerifyFailure = "network" | "unavailable" | "rejected";
+
+const VERIFY_MESSAGES: Record<VerifyFailure, string> = {
+  network: "Couldn't reach Google — check your connection and try again.",
+  unavailable: "Google is temporarily unavailable — try again in a minute.",
+  rejected: "Google rejected this sign-in. On your other device, sign in again and copy a new token.",
+};
+
+/** Why `verifyCredentials` failed; its message is fixed user-facing text. */
+export class VerifyError extends Error {
+  constructor(readonly kind: VerifyFailure) {
+    super(VERIFY_MESSAGES[kind]);
+    this.name = "VerifyError";
+  }
+}
+
+/**
+ * Only a 4xx answer means Google refused these credentials. Rate limiting
+ * (429) and server errors (5xx) say nothing about the token, so telling the
+ * user to copy a new one would be wrong.
+ */
+function classify(e: unknown): VerifyFailure {
+  if (!(e instanceof AuthError) || e.status === undefined) return "network";
+  if (e.status === 429 || e.status >= 500) return "unavailable";
+  return "rejected";
+}
+
+/**
+ * Asks Google for an access token with credentials that are not saved yet, so a
+ * link is only committed once Google accepts them. `requestUrl` has no timeout
+ * of its own; a request still running after `timeoutMs` counts as unreachable
+ * and its eventual answer is ignored.
+ */
+export async function verifyCredentials(creds: Credentials, timeoutMs = 30_000): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new VerifyError("network")), timeoutMs);
+  });
+  try {
+    await Promise.race([
+      postToken({
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
+        refresh_token: creds.refreshToken,
+        grant_type: "refresh_token",
+      }),
+      timeout,
+    ]);
+  } catch (e) {
+    if (e instanceof VerifyError) throw e;
+    throw new VerifyError(classify(e));
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function buildAuthUrl(opts: {

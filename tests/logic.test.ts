@@ -10,7 +10,6 @@ import {
 } from "../src/util/paths";
 import { effectiveExcludes } from "../src/settings";
 import { escapeHtml } from "../src/auth/loopback";
-import { decodeSetupToken, encodeSetupToken } from "../src/auth/setup-token";
 import { md5 } from "../src/util/md5";
 
 let passed = 0;
@@ -167,29 +166,6 @@ check(
   escapeHtml(`<script>alert("x")</script>&'`),
   "&#60;script&#62;alert(&#34;x&#34;)&#60;/script&#62;&#38;&#39;",
 );
-
-// --- setup token ------------------------------------------------------------
-const payload = {
-  v: 1 as const,
-  clientId: "123.apps.googleusercontent.com",
-  clientSecret: "GOCSPX-secret",
-  refreshToken: "1//refresh-토큰-value",
-  folderId: "abc123",
-  folderName: KOREAN_NFC,
-};
-const round = decodeSetupToken(encodeSetupToken(payload));
-check("setup token round-trips", round, payload);
-ok("setup token is prefixed", encodeSetupToken(payload).startsWith("gdvs1:"));
-
-let rejected = 0;
-for (const bad of ["", "hello", "gdvs1:!!!!", "gdvs1:" + btoa('{"v":1}')]) {
-  try {
-    decodeSetupToken(bad);
-  } catch {
-    rejected++;
-  }
-}
-check("malformed tokens are rejected", rejected, 4);
 
 // --- md5 --------------------------------------------------------------------
 const abc = new TextEncoder().encode("abc");

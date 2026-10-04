@@ -1,6 +1,7 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type GDriveSyncPlugin from "../main";
 import { runLoopbackFlow } from "../auth/loopback";
+import { CredentialSaveError } from "../auth/credential-store";
 import { describeError } from "../util/log";
 import { effectiveExcludes } from "../settings";
 
@@ -88,9 +89,17 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       )
       .addText((t) => {
         t.inputEl.type = "password";
-        t.setValue(this.plugin.settings.clientSecret).onChange(async (v) => {
-          this.plugin.settings.clientSecret = v.trim();
-          await this.plugin.saveSettings();
+        t.setValue(this.plugin.credentialStore.getClientSecret()).onChange(async (v) => {
+          try {
+            await this.plugin.credentialStore.setClientSecret(v.trim());
+          } catch (e) {
+            new Notice(e instanceof CredentialSaveError ? e.message : describeError(e));
+            if (e instanceof CredentialSaveError) {
+              // A failed rollback may have unlinked the device; show what is true now.
+              this.plugin.refreshStatus();
+              this.display();
+            }
+          }
         });
       });
 
@@ -102,7 +111,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       )
       .addButton((b) =>
         b
-          .setButtonText(this.plugin.settings.refreshToken ? "Sign in again" : "Sign in")
+          .setButtonText(this.plugin.isLinked() ? "Sign in again" : "Sign in")
           .setCta()
           .onClick(() => void this.signIn()),
       );
@@ -126,7 +135,8 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
           ? "This device syncs with your Google Drive folder. To link it again, paste a " +
               "new setup token."
           : "Phones cannot sign in to Google directly. On your computer, open this " +
-              "plugin's settings and choose 'Copy setup token', then paste it here.",
+              "plugin's settings and choose 'Copy setup token', then paste the token here " +
+              "and type the code it shows.",
       )
       .addButton((b) => {
         b.setButtonText(linked ? "Paste new token" : "Paste setup token").onClick(() =>
@@ -139,7 +149,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSignOut(root: HTMLElement): void {
-    if (!this.plugin.settings.refreshToken) return;
+    if (!this.plugin.isLinked()) return;
     new Setting(root)
       .setName("Sign out")
       .setDesc("Clears the stored token on this device only.")
@@ -155,7 +165,8 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
   }
 
   private async signIn(): Promise<void> {
-    const { clientId, clientSecret } = this.plugin.settings;
+    const clientId = this.plugin.settings.clientId;
+    const clientSecret = this.plugin.credentialStore.getClientSecret();
     if (!clientId || !clientSecret) {
       new Notice("Enter the client ID and client secret first.");
       return;
@@ -164,12 +175,25 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     new Notice("Opening your browser to sign in…");
     try {
       const { refreshToken } = await runLoopbackFlow({ clientId, clientSecret });
-      this.plugin.settings.refreshToken = refreshToken;
-      this.plugin.settings.index = {};
-      this.plugin.settings.changeToken = "";
+      try {
+        // The settings save is the commit: if it fails, the previous sign-in is restored.
+        await this.plugin.credentialStore.savePair({ clientSecret, refreshToken }, () =>
+          this.plugin.commitSettings(() => {
+            this.plugin.settings.linked = true;
+            this.plugin.settings.index = {};
+            this.plugin.settings.changeToken = "";
+          }),
+        );
+      } catch (e) {
+        if (!(e instanceof CredentialSaveError)) throw e;
+        new Notice(e.message);
+        this.plugin.refreshStatus();
+        this.display();
+        return;
+      }
+      this.plugin.signInRestored();
       this.plugin.tokens.invalidate();
       this.plugin.drive.resetCache();
-      await this.plugin.saveSettings();
       await this.plugin.ensureRoot();
       new Notice("Signed in to Google Drive.");
       this.display();
@@ -195,16 +219,15 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     new Setting(root)
       .setName("Copy setup token")
       .setDesc(
-        "Copies your credentials and refresh token as one string. It is encoded, not " +
-          "encrypted — treat it like a password. It goes to the system clipboard, so " +
-          "clipboard-history tools and Universal Clipboard may retain it; clear them " +
-          "afterwards.",
+        "Makes an encrypted token for linking another device. After you copy it, a " +
+          "one-time code appears here; type it on the other device. The code never goes " +
+          "to the clipboard, so a copied token is useless on its own.",
       )
       .addButton((b) =>
         b
           .setButtonText("Copy")
           .setDisabled(!this.plugin.isLinked())
-          .onClick(() => void this.plugin.copySetupToken()),
+          .onClick(() => this.plugin.copySetupToken()),
       );
 
     // On a phone this lives at the top of the page, where signing in would be.
