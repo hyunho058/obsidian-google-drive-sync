@@ -73,25 +73,59 @@ export interface SessionMarks {
   markWritten(suffix: string, field: Field): void;
 }
 
+const APP_SESSION_KEY = "__gdriveVaultSyncAppSession";
+
 /**
- * `sessionStorage` survives a plugin reload but not an app restart, which is
- * exactly "this process". If it is unavailable nothing is remembered, and
- * erasing falls back to the per-instance flag.
+ * A set that lives exactly as long as the app process: it hangs off the global
+ * object, so a plugin reload (a fresh module in the same window) finds the
+ * same set, and quitting the app discards it. `sessionStorage` is not used on
+ * purpose — Obsidian's desktop app writes it to disk and restores it on the
+ * next launch, so it would outlive the process it is meant to describe.
  */
+export function appSessionSet(): Set<string> {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const existing = g[APP_SESSION_KEY];
+  if (existing instanceof Set) return existing as Set<string>;
+  const created = new Set<string>();
+  g[APP_SESSION_KEY] = created;
+  return created;
+}
+
+/** The part of the Web Storage API `adoptPersistedMarks` uses. */
+export interface KeyValueStorage {
+  readonly length: number;
+  key(index: number): string | null;
+  removeItem(key: string): void;
+}
+
+/**
+ * 0.2.0 kept its session marks in `sessionStorage`. Whether a mark found there
+ * comes from an earlier launch or from this very process (0.2.0 → 0.2.1 by
+ * plugin reload, without quitting) cannot be told apart, so each one is copied
+ * into `appSessionSet()` before all of the plugin's keys are removed. That can
+ * only delay an erase by one launch, never allow an early one.
+ */
+export function adoptPersistedMarks(storage: KeyValueStorage | undefined): void {
+  if (!storage) return;
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (key?.startsWith(`${ID_PREFIX}:`)) keys.push(key);
+  }
+  const marks = appSessionSet();
+  // Every mark is taken over before anything is removed, without reading its
+  // value: a storage that throws part-way must not leave a mark behind.
+  for (const key of keys) {
+    if (key.startsWith(`${ID_PREFIX}:generated:`) || key.startsWith(`${ID_PREFIX}:written:`)) marks.add(key);
+  }
+  for (const key of keys) storage.removeItem(key);
+}
+
+/** Session marks backed by `appSessionSet()`. */
 export function sessionMarks(): SessionMarks {
-  const has = (key: string) => {
-    try {
-      return globalThis.sessionStorage?.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  };
+  const has = (key: string) => appSessionSet().has(key);
   const add = (key: string) => {
-    try {
-      globalThis.sessionStorage?.setItem(key, "1");
-    } catch {
-      /* nothing to remember with */
-    }
+    appSessionSet().add(key);
   };
   const generated = (suffix: string) => `${ID_PREFIX}:generated:${suffix}`;
   const written = (suffix: string, field: Field) => `${ID_PREFIX}:written:${suffix}:${field}`;
@@ -396,8 +430,10 @@ export class CredentialStore {
    * a value that may exist only in memory as proof that it reached disk.
    */
   private write(field: Field, value: string): void {
-    this.store.setSecret(this.id(field), value);
+    // Marked first: a mark only ever delays an erase, so a write that throws
+    // part-way (and may or may not have landed) is treated as written.
     this.session.markWritten(this.settings.secretIdSuffix, field);
+    this.store.setSecret(this.id(field), value);
   }
 
   /** Puts previous values back; false if any restore write failed. */

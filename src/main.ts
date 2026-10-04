@@ -1,6 +1,6 @@
 import { Notice, Platform, Plugin, TAbstractFile, debounce } from "obsidian";
 import { AuthError, Credentials, TokenManager, verifyCredentials } from "./auth/oauth";
-import { CredentialStore } from "./auth/credential-store";
+import { CredentialStore, adoptPersistedMarks, appSessionSet } from "./auth/credential-store";
 import { LinkPayload, encryptSetupToken } from "./auth/setup-token";
 import { DriveClient } from "./drive/client";
 import { DEFAULT_SETTINGS, Settings, effectiveExcludes } from "./settings";
@@ -34,9 +34,9 @@ export default class GDriveSyncPlugin extends Plugin {
   private scheduleSync!: ReturnType<typeof debounce>;
   private missingSignInNoticeShown = false;
   /**
-   * sessionStorage key: the missing-sign-in notice is shown once per app
-   * session, across plugin reloads. Per vault, so one vault's notice never
-   * silences another's.
+   * App-session mark: the missing-sign-in notice is shown once per app session,
+   * across plugin reloads (see `appSessionSet`). Per vault, so one vault's
+   * notice never silences another's.
    */
   private missingNoticeKey(): string {
     return `gdrive-vault-sync:sign-in-missing-notice:${this.app.vault.getName()}`;
@@ -52,6 +52,7 @@ export default class GDriveSyncPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.forgetPersistedSessionMarks();
 
     this.log = new Logger(() => this.settings.verbose);
     this.credentialStore = new CredentialStore(
@@ -157,12 +158,9 @@ export default class GDriveSyncPlugin extends Plugin {
   private warnIfSignInMissing(): void {
     if (!this.settings.linked || this.isLinked() || this.missingSignInNoticeShown) return;
     this.missingSignInNoticeShown = true;
-    try {
-      if (window.sessionStorage.getItem(this.missingNoticeKey()) === "1") return;
-      window.sessionStorage.setItem(this.missingNoticeKey(), "1");
-    } catch {
-      /* no session storage: the per-instance flag above still limits it */
-    }
+    const marks = appSessionSet();
+    if (marks.has(this.missingNoticeKey())) return;
+    marks.add(this.missingNoticeKey());
     new Notice(
       Platform.isDesktopApp
         ? "This device's sign-in is missing. Sign in again."
@@ -341,10 +339,19 @@ export default class GDriveSyncPlugin extends Plugin {
   /** After a successful link or sign-in, a later loss of sign-in may be announced again. */
   signInRestored(): void {
     this.missingSignInNoticeShown = false;
+    appSessionSet().delete(this.missingNoticeKey());
+  }
+
+  /**
+   * 0.2.0 kept its session marks in sessionStorage, which Obsidian's desktop
+   * app persists across launches. They are taken over into memory (so an
+   * erase can only be delayed, never brought forward) and then removed.
+   */
+  private forgetPersistedSessionMarks(): void {
     try {
-      window.sessionStorage.removeItem(this.missingNoticeKey());
+      adoptPersistedMarks(window.sessionStorage);
     } catch {
-      /* nothing remembered */
+      /* no session storage to take over */
     }
   }
 

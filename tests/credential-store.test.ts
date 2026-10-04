@@ -5,7 +5,10 @@ import {
   CredentialStore,
   SecretStore,
   SessionMarks,
+  adoptPersistedMarks,
+  appSessionSet,
   secretId,
+  sessionMarks,
 } from "../src/auth/credential-store";
 import { test, eq, assert, rejects, run } from "./harness";
 
@@ -87,7 +90,9 @@ function open(initial: Partial<CredentialSettings>, store = new FakeStore(), ses
     saves.push(JSON.parse(JSON.stringify(settings)) as CredentialSettings);
     store.events.push("save");
   };
-  const cs = new CredentialStore(store, settings, save, { warn: (...a) => warnings.push(a) }, session);
+  // Every fixture is its own app session unless a test shares one explicitly;
+  // the real marks live on globalThis and would leak between tests.
+  const cs = new CredentialStore(store, settings, save, { warn: (...a) => warnings.push(a) }, session ?? fakeSession());
   return { settings, save, failSaves, saves, warnings, store, cs };
 }
 
@@ -725,6 +730,142 @@ test("D21 a client-secret edit whose save and restore both fail unlinks the devi
   eq(f.store.data.get(RT(f)), "", "stored token cleared");
   eq(f.cs.credentials(), null, "the possibly mismatched pair is never used");
   noSecretsIn(f.warnings, "sec-old", "sec-new", "T0");
+});
+
+// ----------------------------------- on-device finding (0.2.1): marks in memory
+
+/** A sessionStorage stand-in that counts every access, like Obsidian's persisted one. */
+function persistedSessionStorage(initial: Record<string, string> = {}) {
+  const data = new Map(Object.entries(initial));
+  const calls = { get: 0, set: 0 };
+  return {
+    calls,
+    data,
+    get length() {
+      return data.size;
+    },
+    key: (i: number) => Array.from(data.keys())[i] ?? null,
+    getItem: (k: string) => {
+      calls.get++;
+      return data.has(k) ? (data.get(k) as string) : null;
+    },
+    setItem: (k: string, v: string) => {
+      calls.set++;
+      data.set(k, v);
+    },
+    removeItem: (k: string) => {
+      data.delete(k);
+    },
+  };
+}
+
+/** Runs `fn` as a fresh app process: no in-memory marks, and `storage` as sessionStorage. */
+async function inFreshProcess(storage: unknown, fn: () => Promise<void> | void): Promise<void> {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const savedMarks = g.__gdriveVaultSyncAppSession;
+  const savedStorage = g.sessionStorage;
+  delete g.__gdriveVaultSyncAppSession;
+  g.sessionStorage = storage;
+  try {
+    await fn();
+  } finally {
+    if (savedMarks === undefined) delete g.__gdriveVaultSyncAppSession;
+    else g.__gdriveVaultSyncAppSession = savedMarks;
+    if (savedStorage === undefined) delete g.sessionStorage;
+    else g.sessionStorage = savedStorage;
+  }
+}
+
+test("D1 session marks never touch sessionStorage, which Obsidian persists across launches", async () => {
+  const storage = persistedSessionStorage();
+  await inFreshProcess(storage, () => {
+    const marks = sessionMarks();
+    marks.markGenerated("0a1b2c3d");
+    marks.markWritten("0a1b2c3d", "refresh-token");
+    assert(marks.isGenerated("0a1b2c3d") && marks.isWritten("0a1b2c3d", "refresh-token"), "marks remembered");
+    eq(storage.calls, { get: 0, set: 0 }, "sessionStorage untouched");
+  });
+});
+
+test("D1 marks survive a plugin reload (same process) but not an app restart (new process)", async () => {
+  await inFreshProcess(undefined, async () => {
+    sessionMarks().markGenerated("0a1b2c3d");
+    // A plugin reload builds new marks over the same global set.
+    assert(sessionMarks().isGenerated("0a1b2c3d"), "visible after a plugin reload");
+    assert(appSessionSet() === appSessionSet(), "one set per process");
+    await inFreshProcess(undefined, () => {
+      assert(!sessionMarks().isGenerated("0a1b2c3d"), "gone in a new process");
+    });
+  });
+});
+
+test("D1 after 0.2.0, the first 0.2.1 launch adopts its persisted marks and the next one erases", async () => {
+  // The 0.2.0 situation on the Mac: phase 1 ran, the store holds both values,
+  // and sessionStorage still carries 0.2.0's marks. Whether they come from an
+  // earlier launch or from this very process cannot be told apart.
+  const store = new FakeStore();
+  const persisted = open({ ...legacyDesktop(), secretIdSuffix: "0a1b2c3d", linked: true }, store);
+  store.data.set(CS(persisted), "legacy-secret-A");
+  store.data.set(RT(persisted), "legacy-token-A");
+  const stale = persistedSessionStorage({
+    "gdrive-vault-sync:generated:0a1b2c3d": "1",
+    "gdrive-vault-sync:written:0a1b2c3d:client-secret": "1",
+    "gdrive-vault-sync:written:0a1b2c3d:refresh-token": "1",
+  });
+  let first!: Fixture;
+  await inFreshProcess(stale, async () => {
+    adoptPersistedMarks(stale); // what main.ts does on load, before migrate()
+    first = restart(persisted, sessionMarks());
+    await first.cs.migrate();
+    eq(
+      [first.settings.clientSecret, first.settings.refreshToken],
+      ["legacy-secret-A", "legacy-token-A"],
+      "kept on the first 0.2.1 launch (marks may be from this process)",
+    );
+    eq(stale.data.size, 0, "sessionStorage cleaned");
+  });
+  await inFreshProcess(stale, async () => {
+    adoptPersistedMarks(stale);
+    const second = restart(first, sessionMarks());
+    await second.cs.migrate();
+    eq([second.settings.clientSecret, second.settings.refreshToken], ["", ""], "erased on the next launch");
+    eq(second.cs.credentials(), {
+      clientId: "id.apps.googleusercontent.com",
+      clientSecret: "legacy-secret-A",
+      refreshToken: "legacy-token-A",
+    }, "credentials served from the store");
+  });
+});
+
+test("D1 adoptPersistedMarks takes over only marks and removes every plugin key", async () => {
+  const storage = persistedSessionStorage({
+    "gdrive-vault-sync:generated:0a1b2c3d": "1",
+    "gdrive-vault-sync:written:0a1b2c3d:refresh-token": "1",
+    "gdrive-vault-sync:sign-in-missing-notice:Notes": "1",
+    "gdrive-vault-sync:generated:ffffffff": "0",
+    "another-plugin:key": "keep me",
+  });
+  await inFreshProcess(storage, () => {
+    adoptPersistedMarks(storage);
+    const marks = sessionMarks();
+    assert(marks.isGenerated("0a1b2c3d"), "generated mark adopted");
+    assert(marks.isWritten("0a1b2c3d", "refresh-token"), "written mark adopted");
+    assert(marks.isGenerated("ffffffff"), "any mark key is adopted, whatever its value (only delays an erase)");
+    assert(!appSessionSet().has("gdrive-vault-sync:sign-in-missing-notice:Notes"), "notice key not adopted");
+    eq(Array.from(storage.data.keys()), ["another-plugin:key"], "only the plugin's keys removed");
+  });
+  adoptPersistedMarks(undefined); // no storage at all: nothing happens
+});
+
+test("D1 a write that throws is still marked, so it can never justify an erase", async () => {
+  const session = fakeSession();
+  const f = open({ ...legacyDesktop(), secretIdSuffix: "0a1b2c3d", linked: true }, new FakeStore(), session);
+  f.store.data.set(CS(f), "legacy-secret-A");
+  f.store.data.set(RT(f), "stale-token");
+  f.store.failFor(RT(f));
+  await f.cs.migrate();
+  assert(session.isWritten("0a1b2c3d", "refresh-token"), "the failed re-copy is marked");
+  eq(f.settings.refreshToken, "legacy-token-A", "legacy token kept");
 });
 
 void run();

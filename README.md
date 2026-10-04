@@ -74,8 +74,8 @@ replaces this plugin's settings file, so the phone has to be linked again:
 2. Copy a folder that contains only the plugin
    (`.obsidian/plugins/gdrive-vault-sync/` with `main.js`, `manifest.json` and
    `styles.css`, plus `.obsidian/community-plugins.json`) onto the phone. Never copy
-   the Mac's own vault folder: for one start after an update its settings file can
-   still hold the old plaintext sign-in.
+   the Mac's own vault folder: until Obsidian has been restarted twice after an update
+   its settings file can still hold the old plaintext sign-in.
 3. Link again with a new setup token and code, as above. Your notes come back down
    from Drive; nothing is deleted.
 
