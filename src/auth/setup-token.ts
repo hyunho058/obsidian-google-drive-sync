@@ -89,6 +89,15 @@ function isCode(normalized: string): boolean {
   return true;
 }
 
+/**
+ * True when text in the token box is shaped like a one-time code instead:
+ * only letters, digits, spaces and dashes, normalizing to a valid code. A
+ * token never qualifies, since its prefix carries a colon.
+ */
+export function looksLikeCode(raw: string): boolean {
+  return /^[0-9A-Za-z\s-]+$/.test(raw) && isCode(normalizeCode(raw));
+}
+
 function bytesToB64url(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);

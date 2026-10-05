@@ -8,6 +8,7 @@ import {
   encryptSetupToken,
   formatCode,
   generateCode,
+  looksLikeCode,
   normalizeCode,
   type LinkPayload,
   type SetupTokenErrorKind,
@@ -415,6 +416,16 @@ test("line breaks picked up in transit do not break a token", async () => {
   const wrapped = "  " + (token.match(/.{1,40}/g) as string[]).join("\n") + "\n";
   eq(checkTokenStructure(wrapped), "complete", "structure");
   eq(await decryptSetupToken(wrapped, code), PAYLOAD, "decrypted payload");
+});
+
+test("a code typed into the token box is recognised as a code", async () => {
+  const { token, code } = await fixture();
+  for (const raw of [code, formatCode(code), "CWNH-0A1K", "cwnh 0a1k", " CWNH-0A1K\n", "cwnh-oa1k"]) {
+    eq(looksLikeCode(raw), true, `looksLikeCode(${JSON.stringify(raw)})`);
+  }
+  for (const raw of [token, "", "   ", "CWNH-0A1", "CWNH-0A1KX", "CWNU-0A1K", "CWNH:0A1K", "CWNH_0A1K", "CWNH.0A1K", "gdvs2", "gdvs2:CWNH0A1K"]) {
+    eq(looksLikeCode(raw), false, `looksLikeCode(${JSON.stringify(raw)})`);
+  }
 });
 
 test("SetupTokenError carries its kind, name and fixed message", () => {

@@ -11,9 +11,20 @@
 
 .gdvs-code-input {
   width: 100%;
-  margin-top: var(--size-4-2);
   font-family: var(--font-monospace);
   letter-spacing: 0.1em;
+}
+
+.gdvs-input-label {
+  display: block;
+  margin: var(--size-4-3) 0 var(--size-4-1);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.gdvs-token-input[aria-invalid="true"],
+.gdvs-code-input[aria-invalid="true"] {
+  border-color: var(--text-error);
 }
 
 .gdvs-code-display {

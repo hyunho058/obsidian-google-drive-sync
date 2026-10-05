@@ -55,8 +55,8 @@ listener that the desktop flow uses. So the credentials travel from the Mac inst
 2. Get the token to your phone (Universal Clipboard or AirDrop). It is encrypted, so
    it is useless without the code, but there is no reason to post it anywhere.
 3. On the iPhone: install and enable the plugin, then settings → **Paste setup
-   token**. Paste the token, type the code (case, spaces and dashes don't matter),
-   and tap **Link this device**. The plugin checks the sign-in with Google, saves
+   token**. Paste the token into box 1, type the code into box 2 (case, spaces and
+   dashes don't matter), and tap **Link this device**. The plugin checks the sign-in with Google, saves
    it, and runs a first sync. A mistyped code just asks you to type it again.
 
 After this the phone is a full peer — it refreshes its own access tokens directly
@@ -210,6 +210,7 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 | Sync stopped with a deletion warning | The guard fired. Check both sides; if it was intentional, run **Reset sync state**. |
 | Duplicate-looking Korean/Japanese filenames | Should not happen — paths are normalized to NFC on both sides. Report it if it does. |
 | "This device's sign-in is missing" | Obsidian's app storage was cleared (e.g. a reinstall). Notes are untouched; sign in again on desktop, or paste a new setup token on the phone. |
+| "That looks like the code" | The code went into the token box. Paste the setup token into box 1 and type the code into box 2. |
 | "That code doesn't match this token" | The code was mistyped, or it belongs to a different copy. Type it again, or copy a new token. |
 | "This is an old, unencrypted setup token" | The copying device runs a version before 0.2.0. Update it and copy a new token. |
 

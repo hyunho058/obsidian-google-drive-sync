@@ -1,13 +1,15 @@
-import { App, ButtonComponent, Modal, Setting } from "obsidian";
+import { App, ButtonComponent, Modal, Platform, Setting } from "obsidian";
 import { CredentialSaveError } from "../auth/credential-store";
 import { VerifyError } from "../auth/oauth";
 import {
   CODE_LENGTH,
   LinkPayload,
   SetupTokenError,
+  type TokenCheck,
   checkTokenStructure,
   decryptSetupToken,
   formatCode,
+  looksLikeCode,
   normalizeCode,
 } from "../auth/setup-token";
 import { describeError } from "../util/log";
@@ -98,6 +100,10 @@ export class CopyTokenModal extends Modal {
   }
 }
 
+/** Shown when the token box holds what is clearly the one-time code. */
+const CODE_IN_TOKEN_BOX = "That looks like the code. Paste the setup token into box 1 and type the code into box 2.";
+const CODE_MOVED = "That was the code, so it is now in box 2. Paste the setup token into box 1.";
+
 /**
  * Takes a pasted token and its one-time code and owns the whole link attempt:
  * it decrypts, hands the payload to `link` (which verifies with Google and
@@ -111,13 +117,12 @@ export class PasteTokenModal extends Modal {
   /** Set on close; a link attempt still running afterwards must not save. */
   private aborted = false;
   /** The token box's last structural check, so focus moves on only once it becomes complete. */
-  private lastTokenCheck = "incomplete";
+  private lastTokenCheck: TokenCheck = "incomplete";
   private linkButton!: ButtonComponent;
   private tokenInput!: HTMLTextAreaElement;
   private codeInput!: HTMLInputElement;
-  private generalError!: HTMLElement;
-  private tokenError!: HTMLElement;
-  private codeError!: HTMLElement;
+  /** The window's only message area: under the Link button, above both boxes. */
+  private errorEl!: HTMLElement;
 
   /**
    * @param link Verifies and saves the decrypted payload. Resolves true once
@@ -138,23 +143,29 @@ export class PasteTokenModal extends Modal {
     contentEl.createEl("p", {
       text:
         "On your other device, open this plugin's settings, choose 'Copy setup token' and " +
-        "tap Copy token. Paste the token here, then type the code it shows.",
+        "tap Copy token. Paste the token into box 1, then type the code it shows into box 2.",
       cls: "setting-item-description",
     });
 
-    // Above both boxes, not below them: on a phone the keyboard covers
-    // everything under the focused field.
+    // The button and every message sit above both boxes, not below them: on a
+    // phone the keyboard covers everything under the focused field.
     new Setting(contentEl).addButton((b) => {
       this.linkButton = b;
       b.setButtonText("Link this device")
         .setCta()
         .onClick(() => void this.submit());
     });
-    this.generalError = contentEl.createDiv({ cls: "gdvs-error" });
+    this.errorEl = contentEl.createDiv({ cls: "gdvs-error" });
 
+    contentEl.createEl("label", {
+      text: "1. Setup token (paste it)",
+      cls: "gdvs-input-label",
+      attr: { for: "gdvs-paste-token" },
+    });
     this.tokenInput = contentEl.createEl("textarea", {
       cls: "gdvs-token-input",
       attr: {
+        id: "gdvs-paste-token",
         rows: "3",
         placeholder: "gdvs2:...",
         enterkeyhint: "next",
@@ -164,13 +175,18 @@ export class PasteTokenModal extends Modal {
         spellcheck: "false",
       },
     });
-    this.tokenError = contentEl.createDiv({ cls: "gdvs-error" });
 
+    contentEl.createEl("label", {
+      text: "2. Code from your other device (type it)",
+      cls: "gdvs-input-label",
+      attr: { for: "gdvs-paste-code" },
+    });
     this.codeInput = contentEl.createEl("input", {
       cls: "gdvs-code-input",
       type: "text",
       attr: {
-        placeholder: "Code, e.g. K7Q4-ZP9M",
+        id: "gdvs-paste-code",
+        placeholder: "e.g. K7Q4-ZP9M",
         enterkeyhint: "go",
         autocapitalize: "characters",
         autocorrect: "off",
@@ -178,18 +194,19 @@ export class PasteTokenModal extends Modal {
         spellcheck: "false",
       },
     });
-    this.codeError = contentEl.createDiv({ cls: "gdvs-error" });
 
-    this.tokenInput.addEventListener("input", (e) => {
-      this.token = this.tokenInput.value;
-      this.tokenError.setText("");
-      const check = checkTokenStructure(this.token);
-      // A whole token needs nothing more typed: move on to the code when it
-      // becomes complete or a new one is pasted, not on every later edit.
-      const pasted = (e as InputEvent).inputType === "insertFromPaste";
-      if (check === "complete" && (this.lastTokenCheck !== "complete" || pasted)) this.codeInput.focus();
-      else if (check === "old-token") this.tokenError.setText(new SetupTokenError("old-token").message);
-      this.lastTokenCheck = check;
+    this.tokenInput.addEventListener("input", (e) =>
+      this.tokenChanged((e as InputEvent).inputType === "insertFromPaste"),
+    );
+    // Box 1 holds one token, so a paste replaces whatever is there (a code
+    // typed by mistake, an earlier paste) instead of landing beside it and
+    // reading as damaged. Without clipboard text the browser pastes as usual.
+    this.tokenInput.addEventListener("paste", (e) => {
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!text || this.busy) return;
+      e.preventDefault();
+      this.tokenInput.value = text;
+      this.tokenChanged(true);
     });
     // A token is one line, so Return moves to the code instead of a newline.
     this.tokenInput.addEventListener("keydown", (e) => {
@@ -201,7 +218,7 @@ export class PasteTokenModal extends Modal {
 
     this.codeInput.addEventListener("input", () => {
       this.code = this.codeInput.value;
-      this.codeError.setText("");
+      this.clearError();
       // Eight code characters (dashes and spaces aside) is the whole code.
       if (normalizeCode(this.code).length >= CODE_LENGTH) this.codeInput.blur();
     });
@@ -215,6 +232,52 @@ export class PasteTokenModal extends Modal {
     window.setTimeout(() => this.tokenInput.focus(), 0);
   }
 
+  private tokenChanged(pasted: boolean): void {
+    this.token = this.tokenInput.value;
+    this.clearError();
+    const check = checkTokenStructure(this.token);
+    // A whole token needs nothing more typed: move on to the code when it
+    // becomes complete or a new one is pasted, not on every later edit.
+    if (check === "complete" && (this.lastTokenCheck !== "complete" || pasted)) this.moveToCode();
+    else if (looksLikeCode(this.token)) this.showError(CODE_IN_TOKEN_BOX, this.tokenInput);
+    else if (check === "old-token") this.showError(new SetupTokenError("old-token").message, this.tokenInput);
+    this.lastTokenCheck = check;
+  }
+
+  /**
+   * After a whole token arrives, go to the code box. iOS may ignore a focus()
+   * that no tap started (suspected on 0.2.1: the keyboard stayed on the token
+   * box and covered the code box), so close the keyboard first: if the focus
+   * does not take, the labelled code box is at least in view.
+   */
+  private moveToCode(): void {
+    this.tokenInput.blur();
+    // A code already typed needs no keyboard: Link is next.
+    if (normalizeCode(this.code).length < CODE_LENGTH) this.codeInput.focus();
+  }
+
+  private showError(message: string, input?: HTMLElement): void {
+    this.errorEl.setText(message);
+    input?.setAttr("aria-invalid", "true");
+  }
+
+  /**
+   * Shows `message` and marks `input`. A phone closes its keyboard instead of
+   * focusing the box: with the keyboard up the window scrolls to the focused
+   * box, which can push the message above it out of sight.
+   */
+  private reject(message: string, input?: HTMLElement): void {
+    this.showError(message, input);
+    if (Platform.isMobile) (document.activeElement as HTMLElement | null)?.blur();
+    else input?.focus();
+  }
+
+  private clearError(): void {
+    this.errorEl.setText("");
+    this.tokenInput.removeAttribute("aria-invalid");
+    this.codeInput.removeAttribute("aria-invalid");
+  }
+
   private setBusy(on: boolean): void {
     this.busy = on;
     this.linkButton.setDisabled(on).setButtonText(on ? "Linking…" : "Link this device");
@@ -224,25 +287,32 @@ export class PasteTokenModal extends Modal {
 
   private async submit(): Promise<void> {
     if (this.busy) return;
-    this.generalError.setText("");
-    this.tokenError.setText("");
-    this.codeError.setText("");
+    this.clearError();
     // Say what is wrong with the token before asking for a code it may not
     // even have (an old token has none).
+    if (looksLikeCode(this.token)) {
+      // Into box 2 for them, unless something is typed there already.
+      if (this.code.trim() !== "") {
+        this.reject(CODE_IN_TOKEN_BOX, this.tokenInput);
+        return;
+      }
+      this.code = this.codeInput.value = this.token.trim();
+      this.token = this.tokenInput.value = "";
+      this.lastTokenCheck = "incomplete";
+      this.reject(CODE_MOVED, this.tokenInput);
+      return;
+    }
     const check = checkTokenStructure(this.token);
     if (check === "incomplete") {
-      this.tokenError.setText("Paste the whole setup token.");
-      this.tokenInput.focus();
+      this.reject("Paste the whole setup token into box 1.", this.tokenInput);
       return;
     }
     if (check === "old-token" || check === "damaged") {
-      this.tokenError.setText(new SetupTokenError(check).message);
-      this.tokenInput.focus();
+      this.reject(new SetupTokenError(check).message, this.tokenInput);
       return;
     }
     if (normalizeCode(this.code).length < CODE_LENGTH) {
-      this.codeError.setText(`Type the ${CODE_LENGTH}-character code.`);
-      this.codeInput.focus();
+      this.reject(`Type the ${CODE_LENGTH}-character code into box 2.`, this.codeInput);
       return;
     }
     this.setBusy(true);
@@ -264,18 +334,17 @@ export class PasteTokenModal extends Modal {
       if (e instanceof SetupTokenError && e.kind === "wrong-code") {
         this.code = "";
         this.codeInput.value = "";
-        this.codeError.setText(e.message);
-        this.codeInput.focus();
+        this.reject(e.message, this.codeInput);
       } else if (e instanceof SetupTokenError) {
-        this.tokenError.setText(e.message);
+        this.reject(e.message, this.tokenInput);
       } else if (e instanceof VerifyError) {
-        this.generalError.setText(e.message);
+        this.reject(e.message);
       } else if (e instanceof CredentialSaveError) {
-        this.generalError.setText(e.message);
+        this.reject(e.message);
         // A failed rollback may have unlinked the device: refresh the caller.
         this.onChanged?.();
       } else {
-        this.generalError.setText(`Couldn't link this device: ${describeError(e)}`);
+        this.reject(`Couldn't link this device: ${describeError(e)}`);
       }
     }
   }

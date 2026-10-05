@@ -30,7 +30,7 @@ Verify that the working tree implements the Requirements R0–R14 of `specs/secu
 
 | Metric | Threshold | How measured |
 |--------|-----------|--------------|
-| Code-verifiable sub-requirements unverified or failing | 0 of 65 | Traceability table: each sub-req → passing test name or cited `file:line` |
+| Code-verifiable sub-requirements unverified or failing | 0 of 67 (65 + R9.11, R9.12 added for 0.2.2) | Traceability table: each sub-req → passing test name or cited `file:line` |
 | Sub-requirements deferred to release/device | only R0.1–R0.3, R12.2, R12.3 and the versions.json part of R12.1 | Same table |
 | Test cases | ≥ 109 | `npm test` totals |
 | main.js size | ≤ 80 KB | `stat -f%z main.js` after `npm run build` |
