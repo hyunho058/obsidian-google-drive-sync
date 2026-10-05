@@ -91,3 +91,11 @@ The loop exits only when every gate above passes and the Evidence Report is emit
 - status: active
 - check: For each security fix in the change, a named test fails when that fix is reverted (re-introduce the bug from a backup copy, run `npm test`, restore and confirm the source is byte-identical); UI-only fixes that unit tests cannot reach are listed as such.
 - note: Kept as a Gate-3 item rather than a Gate-1 command because the revert differs per fix and cannot be one fixed command.
+
+### L4 — UI fixes keep the spec in step
+- cause: gate-fail
+- source: human-approved
+- form: gate3-item
+- status: active
+- check: When a change alters behaviour that a Decision or Requirement describes (layout, focus, message text or placement), the same change amends that Decision/Requirement, adds sub-requirements for new behaviour, and updates Gate 2's sub-requirement count; name each amended id, and list behaviour that goes beyond what the user approved so it can be raised at hand-off.
+- note: The first draft of the 0.2.2 window fix left D9, D15 and R9.6/R9.7/R9.10 describing the old window (Spec alignment 6/10) and added three behaviours beyond the literal approval; both were caught before release.
