@@ -7,11 +7,6 @@ export class Logger {
     if (this.verbose()) console.log(PREFIX, ...args);
   }
 
-  /** Per-sync detail (conflicts, skips). Verbose-only: by default the console shows only problems. */
-  info(...args: unknown[]): void {
-    if (this.verbose()) console.log(PREFIX, ...args);
-  }
-
   warn(...args: unknown[]): void {
     console.warn(PREFIX, ...args);
   }

@@ -132,8 +132,16 @@ export class SyncEngine {
       remote.set(r.path, r);
     }
 
+    // A Drive file whose name this device refuses still exists in Drive. Hold
+    // it: its index entry is kept as is and it takes no part in the deletion
+    // guard or in reconciling, so it is neither counted nor acted on as a
+    // remote delete (Windows refuses names that earlier versions accepted).
+    const held = new Set(rejected);
+
     const next: SyncIndex = { ...index };
-    const paths = new Set<string>([...local.keys(), ...remote.keys(), ...Object.keys(index)]);
+    const paths = new Set<string>(
+      [...local.keys(), ...remote.keys(), ...Object.keys(index)].filter((p) => !held.has(p)),
+    );
 
     // --- deletion guard -----------------------------------------------------
     // A vault that vanished locally (wrong folder opened, iCloud not yet
@@ -144,6 +152,7 @@ export class SyncEngine {
       let vanishedLocal = 0;
       let vanishedRemote = 0;
       for (const p of Object.keys(index)) {
+        if (held.has(p)) continue;
         if (!local.has(p)) vanishedLocal++;
         if (!remote.has(p)) vanishedRemote++;
       }
@@ -366,7 +375,7 @@ export function summarize(report: SyncReport): string {
   if (report.deletedLocal) bits.push(`${report.deletedLocal} removed locally`);
   if (report.conflicts.length) bits.push(`${report.conflicts.length} conflict(s)`);
   if (report.skipped.length) bits.push(`${report.skipped.length} skipped`);
-  if (report.rejected.length) bits.push(`${report.rejected.length} unsafe name(s) blocked`);
+  if (report.rejected.length) bits.push(`${report.rejected.length} unusable name(s) skipped`);
   if (report.errors.length) bits.push(`${report.errors.length} error(s)`);
   return bits.length ? `Sync: ${bits.join(", ")}` : "Sync: already up to date";
 }

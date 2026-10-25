@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, Settings, effectiveExcludes } from "./settings";
 import { SyncEngine, SyncReport, notifyReport, summarize } from "./sync/engine";
 import { Logger, describeError } from "./util/log";
 import { PathFilter, canonical } from "./util/paths";
+import { keepsDeletedCopy } from "./util/trash";
 import { GDriveSyncSettingTab } from "./ui/settings-tab";
 import { ConfirmModal, CopyTokenModal, PasteTokenModal } from "./ui/modals";
 
@@ -33,6 +34,8 @@ export default class GDriveSyncPlugin extends Plugin {
   private localDirty = false;
   private scheduleSync!: ReturnType<typeof debounce>;
   private missingSignInNoticeShown = false;
+  /** Skips and unusable names already named in the console this session. */
+  private reported = new Set<string>();
   /**
    * App-session mark: the missing-sign-in notice is shown once per app session,
    * across plugin reloads (see `appSessionSet`). Per vault, so one vault's
@@ -254,12 +257,15 @@ export default class GDriveSyncPlugin extends Plugin {
 
   /**
    * Files Obsidian indexes go through `fileManager.trashFile`, which honours the
-   * user's "Deleted files" setting. Dotfolders (the config folder, when synced)
-   * are invisible to the Vault API, so those go to the vault's `.trash`.
+   * user's "Deleted files" setting. That setting can also be "Permanently
+   * delete", and a delete made on another device must never be irrecoverable
+   * here, so trashFile is used only when the setting is known to keep a copy.
+   * Otherwise, and for dotfolders the Vault API does not see (the config folder,
+   * when synced), the file goes to the vault's `.trash`.
    */
   private async trashLocalFile(path: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (file) await this.app.fileManager.trashFile(file);
+    if (file && keepsDeletedCopy(this.app.vault)) await this.app.fileManager.trashFile(file);
     else await this.app.vault.adapter.trashLocal(path);
   }
 
@@ -448,15 +454,40 @@ export default class GDriveSyncPlugin extends Plugin {
   }
 
   private reportOutcome(report: SyncReport, explicit: boolean): void {
+    // Skips and unusable names repeat on every sync until the user acts, so
+    // each is named in the console once per session rather than every run.
+    const newSkips = report.skipped.filter((s) => this.firstSighting(`skip:${s}`));
+    const newRejects = report.rejected.filter((r) => this.firstSighting(`reject:${r}`));
+
     const changed =
       report.uploaded + report.downloaded + report.deletedLocal + report.deletedRemote > 0;
-    if (explicit || changed || report.errors.length || report.conflicts.length) {
+    if (
+      explicit ||
+      changed ||
+      report.errors.length ||
+      report.conflicts.length ||
+      newSkips.length ||
+      newRejects.length
+    ) {
       notifyReport(report);
     }
     this.log.debug(summarize(report), report);
-    for (const c of report.conflicts) this.log.info("conflict copy kept at", c);
-    for (const s of report.skipped) this.log.info("skipped", s);
+    for (const c of report.conflicts) this.log.warn("conflict copy kept at", c);
+    for (const s of newSkips) this.log.warn("skipped", s);
+    for (const r of newRejects) {
+      this.log.warn(
+        "skipped a Google Drive file whose name cannot be used as a vault path on this device:",
+        r,
+      );
+    }
     for (const err of report.errors) this.log.warn(err);
+  }
+
+  /** True the first time `key` is seen in this plugin session. */
+  private firstSighting(key: string): boolean {
+    if (this.reported.has(key)) return false;
+    this.reported.add(key);
+    return true;
   }
 
   async ensureRoot(): Promise<void> {

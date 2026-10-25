@@ -13,8 +13,11 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
   `oauth2.googleapis.com` to sign in and refresh access, and `www.googleapis.com` to
   read and write your notes in Google Drive. It contacts no other server.
 - **No telemetry, no ads, no payments.** Nothing about you or your vault is collected.
-- **Files outside the vault.** None are read or written. Desktop sign-in briefly
-  listens on `127.0.0.1` for Google's redirect.
+- **Files outside the vault.** The client secret and refresh token are stored in
+  Obsidian's secure storage, outside the vault, on each device. If Obsidian's
+  "Deleted files" setting uses the system trash, files removed by sync go there.
+  Nothing else outside the vault is read or written. Desktop sign-in briefly listens
+  on `127.0.0.1` for Google's redirect.
 
 ## How it works
 
@@ -140,10 +143,11 @@ never overwrite each other. Set it under **Devices → Device name**.
   Obsidian's secure storage, outside the vault, on each device. This plugin's own
   folder is also permanently excluded, since its `data.json` still holds the Drive
   folder id and sync records.
-- **Local deletes follow Obsidian's "Deleted files" setting** (system trash or the
-  vault's `.trash`), not straight to oblivion. Files in the config folder, which
-  Obsidian does not index, always go to the vault's `.trash`. Remote deletes go to
-  the Drive trash.
+- **Local deletes are never permanent.** They follow Obsidian's "Deleted files"
+  setting when it is the system trash or the vault's `.trash`. When it is set to
+  "Permanently delete", sync still moves the file to the vault's `.trash`. Files in
+  the config folder, which Obsidian does not index, always go to the vault's
+  `.trash`. Remote deletes go to the Drive trash.
 
 ## Security model
 
@@ -179,6 +183,9 @@ paths and get written to disk, so every remote path is validated before use; any
 containing a traversal segment, a control character or a drive letter is skipped and
 reported rather than silently renamed. On Windows, names it would silently rewrite
 (a trailing dot or space, device names like `CON`, or `<>:"|?*`) are skipped too.
+Each skipped name is listed in the developer console once per session. A file
+skipped this way is left alone: it is not treated as deleted, so it stays in Google
+Drive and on the devices that can hold it.
 
 **File access goes through the adapter API.** Obsidian's Vault API only sees files it
 indexes, which leaves out dotfolders such as the config folder. Syncing those when
@@ -221,6 +228,7 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 |---|---|
 | `invalid_grant` after about a week | The consent screen is still in `Testing`. Set it to `In production` and sign in again. |
 | "Google returned no refresh token" | The app is already authorized. Revoke it at <https://myaccount.google.com/permissions> and sign in again. |
+| "unusable name(s) skipped" | A Google Drive file's name cannot be a vault path on this device, such as `Plan?.md` on Windows. The developer console lists it. Rename it on a device that can hold it. |
 | Sync stopped with a deletion warning | The guard fired. Check both sides; if it was intentional, run **Reset sync state**. |
 | Duplicate-looking Korean/Japanese filenames | Should not happen — paths are normalized to NFC on both sides. Report it if it does. |
 | "This device's sign-in is missing" | Obsidian's app storage was cleared (e.g. a reinstall). Notes are untouched; sign in again on desktop, or paste a new setup token on the phone. |
@@ -228,7 +236,8 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 | "That code doesn't match this token" | The code was mistyped, or it belongs to a different copy. Type it again, or copy a new token. |
 | "This is an old, unencrypted setup token" | The copying device runs a version before 0.2.0. Update it and copy a new token. |
 
-Turn on **Verbose logging** in Advanced for per-file detail in the developer console.
+Skipped files, unusable names and conflict copies are named in the developer console
+by default. Turn on **Verbose logging** in Advanced for per-file detail of every sync.
 
 ## Development
 
