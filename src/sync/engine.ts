@@ -57,10 +57,17 @@ export class SyncEngine {
   /** Paths the engine is writing, so vault events do not re-trigger a sync. */
   readonly suppressed = new Set<string>();
 
+  /**
+   * `trash` moves a local file out of the way on a remote delete. The caller
+   * supplies it so files Obsidian indexes go through the user's own deletion
+   * preference; the default is the vault's `.trash`, which also covers the
+   * dotfolders the Vault API does not see.
+   */
   constructor(
     private adapter: DataAdapter,
     private drive: DriveClient,
     private log: Logger,
+    private trash: (path: string) => Promise<void> = (path) => adapter.trashLocal(path),
   ) {}
 
   async scanLocal(filter: PathFilter): Promise<Map<string, LocalEntry>> {
@@ -328,7 +335,7 @@ export class SyncEngine {
   private async deleteLocal(path: string, next: SyncIndex, report: SyncReport): Promise<void> {
     this.suppressed.add(path);
     try {
-      if (await this.adapter.exists(path)) await this.adapter.trashLocal(path);
+      if (await this.adapter.exists(path)) await this.trash(path);
     } finally {
       this.suppressed.delete(path);
     }

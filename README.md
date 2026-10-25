@@ -1,9 +1,20 @@
-# Google Drive Vault Sync
+# Vault Sync for Google Drive
 
 Two-way sync between an Obsidian vault and Google Drive, using **your own** Google
 credentials. No third-party server is involved: your devices talk to Google directly.
 
 Built for a Mac + iPhone pair, which is the combination that shapes most of the design.
+
+## Disclosures
+
+- **Account required.** You need a Google account and your own (free) Google Cloud
+  project with an OAuth client; setup is described below.
+- **Network use.** The plugin talks only to Google: `accounts.google.com` and
+  `oauth2.googleapis.com` to sign in and refresh access, and `www.googleapis.com` to
+  read and write your notes in Google Drive. It contacts no other server.
+- **No telemetry, no ads, no payments.** Nothing about you or your vault is collected.
+- **Files outside the vault.** None are read or written. Desktop sign-in briefly
+  listens on `127.0.0.1` for Google's redirect.
 
 ## How it works
 
@@ -129,8 +140,10 @@ never overwrite each other. Set it under **Devices → Device name**.
   Obsidian's secure storage, outside the vault, on each device. This plugin's own
   folder is also permanently excluded, since its `data.json` still holds the Drive
   folder id and sync records.
-- **Local deletes go to the vault's `.trash`**, not straight to oblivion. Remote
-  deletes go to the Drive trash.
+- **Local deletes follow Obsidian's "Deleted files" setting** (system trash or the
+  vault's `.trash`), not straight to oblivion. Files in the config folder, which
+  Obsidian does not index, always go to the vault's `.trash`. Remote deletes go to
+  the Drive trash.
 
 ## Security model
 
@@ -164,7 +177,8 @@ one leaks together with its code, revoke access at
 file's `name` may contain `/`, `..` or control characters. Those names become vault
 paths and get written to disk, so every remote path is validated before use; anything
 containing a traversal segment, a control character or a drive letter is skipped and
-reported rather than silently renamed.
+reported rather than silently renamed. On Windows, names it would silently rewrite
+(a trailing dot or space, device names like `CON`, or `<>:"|?*`) are skipped too.
 
 **File access goes through the adapter API.** Obsidian's Vault API only sees files it
 indexes, which leaves out dotfolders such as the config folder. Syncing those when

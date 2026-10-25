@@ -57,14 +57,27 @@ export function folderChain(path: string): string[] {
  * that is not a plain, self-contained relative path is rejected rather than
  * rewritten — silently renaming an attacker's file would hide the attempt.
  */
-export function isSafeVaultPath(path: string): boolean {
+export function isSafeVaultPath(path: string, windows = false): boolean {
   const p = canonical(path);
   if (p === "" || p.length > 1024) return false;
   // Control characters, including NUL. Windows drive letters and UNC prefixes.
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(p)) return false;
   if (/^[a-zA-Z]:/.test(p) || p.startsWith("//")) return false;
-  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== ".." && (!windows || isWindowsSafeSegment(seg)));
+}
+
+/**
+ * Names Windows cannot hold as written. It drops a trailing dot or space (so
+ * `.obsidian.` would land in `.obsidian`), maps `CON`, `NUL` and the like to
+ * devices whatever the extension, and reads `:` as a stream separator. Only
+ * applied on Windows: elsewhere these are ordinary names, and rejecting a name
+ * that exists locally would read as a remote delete.
+ */
+function isWindowsSafeSegment(seg: string): boolean {
+  if (/[<>:"|?*]/.test(seg)) return false;
+  if (/[. ]$/.test(seg)) return false;
+  return !/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]) *(\.|$)/i.test(seg);
 }
 
 /**

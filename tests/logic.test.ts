@@ -108,6 +108,27 @@ for (const good of [
   ok(`accepts ordinary path: ${JSON.stringify(good)}`, isSafeVaultPath(good));
 }
 
+// Windows drops a trailing dot or space and maps device names, so these would
+// land somewhere other than their name says. Elsewhere they are ordinary names.
+for (const evil of [
+  ".obsidian./plugins/x/main.js",
+  ".git /hooks/pre-commit",
+  "notes/CON",
+  "notes/nul.md",
+  "notes/Com1.txt",
+  "notes/LPT9 .md",
+  "notes/a:stream.md",
+  "notes/what?.md",
+  'notes/"quoted".md',
+  "notes/a|b.md",
+]) {
+  ok(`rejects on Windows: ${JSON.stringify(evil)}`, !isSafeVaultPath(evil, true));
+  ok(`accepts off Windows: ${JSON.stringify(evil)}`, isSafeVaultPath(evil));
+}
+for (const good of ["notes/console.md", "notes/nullable.md", "notes/com10.md", "file.with.dots.md", "..hidden-but-fine.md"]) {
+  ok(`accepts on Windows: ${JSON.stringify(good)}`, isSafeVaultPath(good, true));
+}
+
 ok("NFD input is judged after normalization", isSafeVaultPath(`notes/${KOREAN_NFD}.md`));
 // Leading slashes are stripped before validation, so this is an ordinary
 // relative path inside the vault rather than an escape.

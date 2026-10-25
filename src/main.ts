@@ -69,8 +69,8 @@ export default class GDriveSyncPlugin extends Plugin {
     }
 
     this.tokens = new TokenManager(() => this.credentials());
-    this.drive = new DriveClient(this.tokens, this.log);
-    this.engine = new SyncEngine(this.app.vault.adapter, this.drive, this.log);
+    this.drive = new DriveClient(this.tokens, this.log, { windowsNames: Platform.isWin });
+    this.engine = new SyncEngine(this.app.vault.adapter, this.drive, this.log, (path) => this.trashLocalFile(path));
 
     if (this.settings.rootFolderId) this.drive.setRoot(this.settings.rootFolderId);
 
@@ -133,7 +133,9 @@ export default class GDriveSyncPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const stored = (await this.loadData()) as Partial<Settings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {});
+    // Deep-copied defaults, so the live settings never share an array or object with DEFAULT_SETTINGS.
+    const defaults = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Settings;
+    this.settings = Object.assign(defaults, stored ?? {});
     if (!this.settings.deviceName) this.settings.deviceName = defaultDeviceName();
     if (!this.settings.rootFolderName) this.settings.rootFolderName = this.app.vault.getName();
   }
@@ -248,6 +250,17 @@ export default class GDriveSyncPlugin extends Plugin {
       Object.assign(this.settings, before);
       throw e;
     }
+  }
+
+  /**
+   * Files Obsidian indexes go through `fileManager.trashFile`, which honours the
+   * user's "Deleted files" setting. Dotfolders (the config folder, when synced)
+   * are invisible to the Vault API, so those go to the vault's `.trash`.
+   */
+  private async trashLocalFile(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file) await this.app.fileManager.trashFile(file);
+    else await this.app.vault.adapter.trashLocal(path);
   }
 
   confirmResetState(): void {
