@@ -77,11 +77,9 @@ export class DriveClient {
   private folderWaits = new Map<string, Promise<string>>();
   private rootId: string | null = null;
 
-  /** `windowsNames`: also reject names Windows cannot hold as written (see `isSafeVaultPath`). */
   constructor(
     private tokens: TokenManager,
     private log: { debug(...a: unknown[]): void; warn(...a: unknown[]): void },
-    private opts: { windowsNames?: boolean } = {},
   ) {}
 
   resetCache(): void {
@@ -319,7 +317,7 @@ export class DriveClient {
       const p = pathOf(f.id);
       if (p === null || p === "") continue;
       // A Drive name containing `/` or `..` would escape the vault on write.
-      if (!isSafeVaultPath(p, this.opts.windowsNames)) {
+      if (!isSafeVaultPath(p)) {
         rejected.push(p);
         continue;
       }

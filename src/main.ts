@@ -3,7 +3,7 @@ import { AuthError, Credentials, TokenManager, verifyCredentials } from "./auth/
 import { CredentialStore, adoptPersistedMarks, appSessionSet } from "./auth/credential-store";
 import { LinkPayload, encryptSetupToken } from "./auth/setup-token";
 import { DriveClient } from "./drive/client";
-import { DEFAULT_SETTINGS, Settings, effectiveExcludes } from "./settings";
+import { DEFAULT_SETTINGS, Settings, cloneSettings, effectiveExcludes } from "./settings";
 import { SyncEngine, SyncReport, notifyReport, summarize } from "./sync/engine";
 import { Logger, describeError } from "./util/log";
 import { PathFilter, canonical } from "./util/paths";
@@ -72,7 +72,7 @@ export default class GDriveSyncPlugin extends Plugin {
     }
 
     this.tokens = new TokenManager(() => this.credentials());
-    this.drive = new DriveClient(this.tokens, this.log, { windowsNames: Platform.isWin });
+    this.drive = new DriveClient(this.tokens, this.log);
     this.engine = new SyncEngine(this.app.vault.adapter, this.drive, this.log, (path) => this.trashLocalFile(path));
 
     if (this.settings.rootFolderId) this.drive.setRoot(this.settings.rootFolderId);
@@ -137,7 +137,7 @@ export default class GDriveSyncPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const stored = (await this.loadData()) as Partial<Settings> | null;
     // Deep-copied defaults, so the live settings never share an array or object with DEFAULT_SETTINGS.
-    const defaults = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Settings;
+    const defaults = cloneSettings(DEFAULT_SETTINGS);
     this.settings = Object.assign(defaults, stored ?? {});
     if (!this.settings.deviceName) this.settings.deviceName = defaultDeviceName();
     if (!this.settings.rootFolderName) this.settings.rootFolderName = this.app.vault.getName();
@@ -245,7 +245,7 @@ export default class GDriveSyncPlugin extends Plugin {
    * restores secrets on failure (`savePair`'s commit) leaves everything as it was.
    */
   async commitSettings(change: () => void): Promise<void> {
-    const before = JSON.parse(JSON.stringify(this.settings)) as Settings;
+    const before = cloneSettings(this.settings);
     change();
     try {
       await this.saveSettings();

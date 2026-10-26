@@ -8,6 +8,8 @@
  * filename.
  */
 
+import { Platform } from "obsidian";
+
 export function nfc(s: string): string {
   return s.normalize("NFC");
 }
@@ -56,8 +58,11 @@ export function folderChain(path: string): string[] {
  * written to disk, so an unvetted name is a write outside the vault. Anything
  * that is not a plain, self-contained relative path is rejected rather than
  * rewritten — silently renaming an attacker's file would hide the attempt.
+ *
+ * `windows` adds the Windows naming rules. It defaults to the platform this
+ * runs on, so every caller applies the same rule without passing it.
  */
-export function isSafeVaultPath(path: string, windows = false): boolean {
+export function isSafeVaultPath(path: string, windows = Platform.isWin): boolean {
   const p = canonical(path);
   if (p === "" || p.length > 1024) return false;
   // Control characters, including NUL. Windows drive letters and UNC prefixes.
