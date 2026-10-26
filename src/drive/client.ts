@@ -64,7 +64,7 @@ function q(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Without these Google hides Shared Drive content even under full scope, so
@@ -102,7 +102,7 @@ export class DriveClient {
   constructor(
     private tokens: TokenManager,
     private log: { debug(...a: unknown[]): void; warn(...a: unknown[]): void },
-    private sleep: (ms: number) => Promise<void> = sleep,
+    private sleep: (ms: number) => Promise<void> = wait,
   ) {}
 
   resetCache(): void {

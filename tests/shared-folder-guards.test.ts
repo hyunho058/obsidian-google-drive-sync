@@ -180,4 +180,10 @@ test("listTree throws when Drive flags a folder listing as incomplete", async ()
   eq(c.hasListed(), false, "hasListed");
 });
 
+test("DriveClient can be built without an injected sleep, as the plugin does", () => {
+  // The default once named the parameter itself, so every plugin start threw.
+  const c = new DriveClient({ getAccessToken: async () => "t", invalidate() {} } as unknown as TokenManager, silent);
+  eq(c.getRoot(), null, "root");
+});
+
 void run().finally(() => setRequestUrlHandler(null));
