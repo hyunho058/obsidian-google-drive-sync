@@ -2,9 +2,12 @@ import { Notice, Platform, Plugin, TAbstractFile, debounce } from "obsidian";
 import { AuthError, Credentials, TokenManager, verifyCredentials } from "./auth/oauth";
 import { CredentialStore, adoptPersistedMarks, appSessionSet } from "./auth/credential-store";
 import { LinkPayload, encryptSetupToken } from "./auth/setup-token";
-import { DriveClient } from "./drive/client";
-import { DEFAULT_SETTINGS, Settings, cloneSettings, effectiveExcludes } from "./settings";
+import { DriveClient, DriveError } from "./drive/client";
+import { MSG_SYNC_RUNNING, rootProblem } from "./drive/folder-ref";
+import type { FolderInspection } from "./drive/types";
+import { DEFAULT_SETTINGS, Settings, applyLinkedFolder, cloneSettings, effectiveExcludes } from "./settings";
 import { SyncEngine, SyncReport, notifyReport, summarize } from "./sync/engine";
+import { QuietProbes, relevantChange } from "./sync/probe";
 import { Logger, describeError } from "./util/log";
 import { PathFilter, canonical } from "./util/paths";
 import { keepsDeletedCopy } from "./util/trash";
@@ -36,6 +39,14 @@ export default class GDriveSyncPlugin extends Plugin {
   private missingSignInNoticeShown = false;
   /** Skips and unusable names already named in the console this session. */
   private reported = new Set<string>();
+  /** Quiet probes in a row; a long streak forces a full walk in case the change feed missed something. */
+  private quiet = new QuietProbes();
+  /**
+   * Root id last confirmed reachable and writable, so a pinned folder costs
+   * one `files.get` per session rather than one per sync. Cleared whenever
+   * the client's root is reset or set, so a new sign-in or pin re-checks.
+   */
+  private verifiedRoot: string | null = null;
   /**
    * App-session mark: the missing-sign-in notice is shown once per app session,
    * across plugin reloads (see `appSessionSet`). Per vault, so one vault's
@@ -155,6 +166,11 @@ export default class GDriveSyncPlugin extends Plugin {
     return this.credentials() !== null;
   }
 
+  /** True while a sync is running; the sync root must not change under it. */
+  isSyncing(): boolean {
+    return this.running;
+  }
+
   /**
    * A device that was linked but has lost its credentials (e.g. app storage
    * cleared) says so once per session instead of silently not syncing. A
@@ -188,6 +204,8 @@ export default class GDriveSyncPlugin extends Plugin {
         ...creds,
         folderId: this.settings.rootFolderId,
         folderName: this.settings.rootFolderName,
+        folderLink: this.settings.rootFolderLink,
+        folderLinkName: this.settings.rootFolderLinkName,
       }),
     ).open();
   }
@@ -209,6 +227,9 @@ export default class GDriveSyncPlugin extends Plugin {
     await this.credentialStore.ensureIds();
     await verifyCredentials(payload);
     if (isAborted()) return false;
+    // Linking replaces the root and the baseline; a running sync would write its
+    // old-root index back over them.
+    if (this.running) throw new Error(MSG_SYNC_RUNNING);
 
     try {
       await this.credentialStore.savePair(
@@ -217,8 +238,7 @@ export default class GDriveSyncPlugin extends Plugin {
         this.commitSettings(() => {
           this.settings.clientId = payload.clientId;
           this.settings.linked = true;
-          if (payload.folderId) this.settings.rootFolderId = payload.folderId;
-          if (payload.folderName) this.settings.rootFolderName = payload.folderName;
+          applyLinkedFolder(this.settings, payload);
           // A new link means a new device: nothing is agreed on yet.
           this.settings.index = {};
           this.settings.changeToken = "";
@@ -233,6 +253,7 @@ export default class GDriveSyncPlugin extends Plugin {
     this.tokens.invalidate();
     this.drive.resetCache();
     if (this.settings.rootFolderId) this.drive.setRoot(this.settings.rootFolderId);
+    this.forgetVerifiedRoot();
 
     new Notice("Device linked. Running the first sync…");
     void this.syncNow("link");
@@ -303,6 +324,7 @@ export default class GDriveSyncPlugin extends Plugin {
     }
     this.tokens.invalidate();
     this.drive.resetCache();
+    this.forgetVerifiedRoot();
     this.setStatus("Drive: not signed in");
   }
 
@@ -398,13 +420,29 @@ export default class GDriveSyncPlugin extends Plugin {
 
     try {
       await this.ensureRoot();
+      // Here rather than in ensureRoot: sign-in awaits that, and a lost folder is not a failed sign-in.
+      await this.verifyPinnedRoot();
+      const root = this.drive.getRoot();
 
       // Cheap probe first: if nothing changed on either side, skip the sweep.
+      // It can only judge changes once a walk this session has mapped the
+      // tree's folders, and a long quiet streak yields to a walk anyway.
       const explicit = reason === "ribbon" || reason === "command" || reason === "link";
-      if (!explicit && !this.localDirty && this.settings.changeToken) {
-        const probe = await this.drive.hasChangesSince(this.settings.changeToken);
+      if (
+        !explicit &&
+        !this.localDirty &&
+        this.settings.changeToken &&
+        this.drive.hasListed() &&
+        !this.quiet.forceSweep()
+      ) {
+        const knownIds = new Set(Object.values(this.settings.index).map((e) => e.id));
+        const knownFolders = this.drive.knownFolderIds();
+        const probe = await this.drive.hasChangesSince(this.settings.changeToken, (c) =>
+          relevantChange(c, knownIds, knownFolders),
+        );
         this.settings.changeToken = probe.nextToken;
         if (!probe.changed) {
+          this.quiet.quiet();
           this.settings.lastSync = Date.now();
           await this.saveSettings();
           this.setStatus("Drive: up to date");
@@ -421,7 +459,21 @@ export default class GDriveSyncPlugin extends Plugin {
         maxFileBytes: Math.max(1, this.settings.maxFileMB) * 1024 * 1024,
         deletionGuardRatio: this.settings.deletionGuardRatio,
         concurrency: Math.max(1, this.settings.concurrency),
+        expectedRoot: root ?? undefined,
       });
+      this.quiet.changed();
+
+      // The folder was pinned, unpinned or renamed mid-run: this index describes
+      // the old root, and the baseline for the new one was already cleared. The
+      // settings are checked as well as the client, because settings are saved
+      // before the client switches; writing this index back in that gap would
+      // make the next sync read the new folder's missing files as deletions.
+      if (this.drive.getRoot() !== root || this.settings.rootFolderId !== root) {
+        this.localDirty = true;
+        this.log.debug("sync root changed during the run; result discarded");
+        this.setStatus("Drive: idle");
+        return;
+      }
 
       if (report.aborted) {
         this.localDirty = wasDirty;
@@ -490,12 +542,57 @@ export default class GDriveSyncPlugin extends Plugin {
     return true;
   }
 
+  /** Call after every `drive.resetCache()` or `drive.setRoot()`, so the next sync checks the pinned folder again. */
+  forgetVerifiedRoot(): void {
+    this.verifiedRoot = null;
+  }
+
+  /** The old-sign-in explanation, once a token response has shown the scope is too narrow for shared folders. */
+  scopeHint(): string | null {
+    if (this.tokens.hasFullDrive() !== false) return null;
+    return Platform.isDesktopApp
+      ? "This sign-in can only see folders the plugin created. Sign in again to use a shared folder."
+      : "This sign-in can only see folders the plugin created. Sign in again on your computer and paste a new setup token here.";
+  }
+
+  /**
+   * Checks a pinned folder is still there and writable before anything is
+   * compared. A problem stops the sync and changes nothing, so restoring
+   * access resumes where it left off. A pin made before sign-in (no verified
+   * name yet) is verified here for the first time and gets the pin-time wording.
+   */
+  private async verifyPinnedRoot(): Promise<void> {
+    const root = this.drive.getRoot();
+    if (!this.settings.rootFolderLink || root === null || this.verifiedRoot === root) return;
+    const id = this.settings.rootFolderId;
+    let inspection: FolderInspection | { error: unknown };
+    try {
+      inspection = await this.drive.inspectFolder(id);
+    } catch (error) {
+      inspection = { error };
+    }
+    const problem = rootProblem(inspection, this.settings.rootFolderLinkName !== "", this.scopeHint());
+    if (problem !== null) {
+      // Network and sign-in failures keep their own error, so a fatal sign-in still reads as one.
+      if ("error" in inspection && problem === describeError(inspection.error)) throw inspection.error;
+      throw new DriveError(problem, 0);
+    }
+    // The pin may have changed while Google answered; that one gets its own check.
+    if (this.drive.getRoot() !== root || this.settings.rootFolderId !== id) return;
+    this.verifiedRoot = root;
+    if (this.settings.rootFolderLinkName === "" && "name" in inspection) {
+      this.settings.rootFolderLinkName = inspection.name;
+      await this.saveSettings();
+    }
+  }
+
   async ensureRoot(): Promise<void> {
     if (this.drive.getRoot()) return;
     const id = this.settings.rootFolderId
       ? this.settings.rootFolderId
       : await this.drive.ensureRootFolder(this.settings.rootFolderName);
     this.drive.setRoot(id);
+    this.forgetVerifiedRoot();
     if (this.settings.rootFolderId !== id) {
       this.settings.rootFolderId = id;
       await this.saveSettings();

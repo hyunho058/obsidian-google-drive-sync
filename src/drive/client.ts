@@ -1,7 +1,7 @@
 import { RequestUrlResponse, requestUrl } from "obsidian";
 import { AuthError, TokenManager } from "../auth/oauth";
 import { baseOf, canonical, folderChain, isSafeVaultPath, joinPath, nfc } from "../util/paths";
-import { DriveFile, FILE_FIELDS, FOLDER_MIME, RemoteEntry } from "./types";
+import { DriveFile, FILE_FIELDS, FOLDER_MIME, FolderInspection, GOOGLE_APPS_PREFIX, RemoteEntry } from "./types";
 
 const API = "https://www.googleapis.com/drive/v3";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
@@ -64,7 +64,21 @@ function q(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Without these Google hides Shared Drive content even under full scope, so
+ * every files and changes request carries them; lists also need the second.
+ */
+const ALL_DRIVES = "supportsAllDrives=true";
+const ALL_DRIVES_LIST = "supportsAllDrives=true&includeItemsFromAllDrives=true";
+
+/** One entry of the Drive change feed, as `hasChangesSince` requests it. */
+export interface DriveChange {
+  fileId?: string;
+  removed?: boolean;
+  file?: { id?: string; parents?: string[]; trashed?: boolean };
+}
 
 export class DriveClient {
   /** vault-relative folder path -> Drive folder id. "" is the vault root. */
@@ -76,23 +90,31 @@ export class DriveClient {
    */
   private folderWaits = new Map<string, Promise<string>>();
   private rootId: string | null = null;
+  /**
+   * Until a walk completes the folder map holds only the root, so the change
+   * probe cannot tell whether a change is inside the tree.
+   */
+  private listed = false;
 
   constructor(
     private tokens: TokenManager,
     private log: { debug(...a: unknown[]): void; warn(...a: unknown[]): void },
+    private sleep: (ms: number) => Promise<void> = sleep,
   ) {}
 
   resetCache(): void {
-    this.folderIds.clear();
+    // Replaced, not cleared: a finished walk hands this map to its caller.
+    this.folderIds = new Map();
     this.folderWaits.clear();
     this.rootId = null;
+    this.listed = false;
   }
 
   setRoot(id: string): void {
     this.rootId = id;
-    this.folderIds.clear();
+    this.folderIds = new Map([["", id]]);
     this.folderWaits.clear();
-    this.folderIds.set("", id);
+    this.listed = false;
   }
 
   getRoot(): string | null {
@@ -112,7 +134,16 @@ export class DriveClient {
     let attempt = 0;
 
     for (;;) {
-      const token = await this.tokens.getAccessToken();
+      let token: string;
+      try {
+        token = await this.tokens.getAccessToken();
+      } catch (e) {
+        // A token-endpoint refusal carries the token endpoint's HTTP status.
+        // Drop it, so an AuthError with status 403 always means Drive refused a
+        // file or folder (D14) and never a failed token refresh.
+        if (e instanceof AuthError && e.status !== undefined) throw new AuthError(e.message, e.fatal);
+        throw e;
+      }
       const res = await requestUrl({
         url: opts.url,
         method: opts.method ?? "GET",
@@ -142,7 +173,7 @@ export class DriveClient {
       if (retryable && attempt < 5) {
         const backoff = Math.min(16000, 2 ** attempt * 500) + Math.random() * 400;
         this.log.warn(`Drive ${res.status} on ${opts.method ?? "GET"} — retrying in ${Math.round(backoff)}ms`);
-        await sleep(backoff);
+        await this.sleep(backoff);
         attempt++;
         continue;
       }
@@ -153,8 +184,10 @@ export class DriveClient {
       } catch {
         detail = res.text;
       }
-      if (res.status === 401 || res.status === 403) {
-        throw new AuthError(`Google Drive refused the request (${res.status}): ${detail}`, false);
+      // A throttled 403 is not a permission refusal; keeping it out of AuthError
+      // lets callers read `status === 403` as "not allowed" without the body.
+      if (res.status === 401 || (res.status === 403 && !throttled)) {
+        throw new AuthError(`Google Drive refused the request (${res.status}): ${detail}`, false, res.status);
       }
       throw new DriveError(`Google Drive request failed (${res.status}): ${detail}`, res.status);
     }
@@ -168,9 +201,12 @@ export class DriveClient {
   // ------------------------------------------------------------------ folders
 
   /**
-   * Finds or creates the vault's root folder. `drive.file` only exposes files
-   * this OAuth client created, so this search reliably finds our own folder and
-   * nothing else the user owns.
+   * Finds or creates the vault's root folder by name. The token can see the
+   * user's whole Drive, so a folder that merely shares the vault's name must
+   * not be adopted: the search only matches folders carrying the `gdvs`
+   * appProperty that `createFolder` stamps, which only this OAuth client can
+   * see. Two matches can only come from an earlier creation race; the oldest
+   * is the one other devices already sync with.
    */
   async ensureRootFolder(name: string): Promise<string> {
     if (this.rootId) return this.rootId;
@@ -179,18 +215,24 @@ export class DriveClient {
     const found = await this.json<{ files: DriveFile[] }>({
       url:
         `${API}/files?q=${encodeURIComponent(
-          `name='${safe}' and mimeType='${FOLDER_MIME}' and trashed=false and 'root' in parents`,
-        )}&fields=${encodeURIComponent("files(id,name)")}&pageSize=10`,
+          `name='${safe}' and mimeType='${FOLDER_MIME}' and trashed=false and 'root' in parents` +
+            ` and appProperties has { key='gdvs' and value='1' }`,
+        )}&fields=${encodeURIComponent("files(id,name,createdTime)")}` +
+        `&orderBy=createdTime&pageSize=10&${ALL_DRIVES_LIST}`,
     });
 
-    const id = found.files?.[0]?.id ?? (await this.createFolder(nfc(name), "root"));
+    const matches = found.files ?? [];
+    if (matches.length > 1) {
+      this.log.warn(`Found ${matches.length} plugin folders with this name in Drive; using the oldest.`);
+    }
+    const id = matches[0]?.id ?? (await this.createFolder(nfc(name), "root"));
     this.setRoot(id);
     return id;
   }
 
   private async createFolder(name: string, parentId: string): Promise<string> {
     const created = await this.json<DriveFile>({
-      url: `${API}/files?fields=id`,
+      url: `${API}/files?fields=id&${ALL_DRIVES}`,
       method: "POST",
       contentType: "application/json",
       body: JSON.stringify({
@@ -232,7 +274,7 @@ export class DriveClient {
         url:
           `${API}/files?q=${encodeURIComponent(
             `name='${q(nfc(name))}' and mimeType='${FOLDER_MIME}' and trashed=false and '${parentId}' in parents`,
-          )}&fields=${encodeURIComponent("files(id,name)")}&pageSize=10`,
+          )}&fields=${encodeURIComponent("files(id,name)")}&pageSize=10&${ALL_DRIVES_LIST}`,
       });
       const id = res.files?.[0]?.id ?? (await this.createFolder(name, parentId));
       this.folderIds.set(fullPath, id);
@@ -243,99 +285,138 @@ export class DriveClient {
     return work;
   }
 
+  /**
+   * One `files.get` of a folder someone wants to sync with. Deliberately
+   * uncached: the settings tab checks arbitrary ids and needs a fresh answer.
+   */
+  async inspectFolder(id: string): Promise<FolderInspection> {
+    const f = await this.json<DriveFile & { capabilities?: { canAddChildren?: boolean } }>({
+      url:
+        `${API}/files/${encodeURIComponent(id)}` +
+        `?fields=${encodeURIComponent("id,name,mimeType,trashed,capabilities(canAddChildren)")}&${ALL_DRIVES}`,
+    });
+    return {
+      id: f.id,
+      name: f.name,
+      isFolder: f.mimeType === FOLDER_MIME,
+      trashed: !!f.trashed,
+      writable: f.capabilities?.canAddChildren === true,
+    };
+  }
+
   // -------------------------------------------------------------------- listing
 
+  /** True once a walk has completed since the root was last set. */
+  hasListed(): boolean {
+    return this.listed;
+  }
+
+  knownFolderIds(): Set<string> {
+    return new Set(this.folderIds.values());
+  }
+
   /**
-   * Lists everything the app can see in one paged sweep and reconstructs vault
-   * paths from the parent graph. One request per 1000 files beats walking the
-   * tree folder by folder, and it rebuilds the path map from scratch on a fresh
-   * device.
+   * Walks the tree down from the root folder, breadth first. The token can see
+   * the whole Drive, so sweeping everything and filtering would page through
+   * the user's entire account. Any failed folder listing fails the walk: a
+   * partial tree returned as success would read as remote deletions.
    */
-  async listTree(): Promise<{
+  async listTree(concurrency = 4, expectedRoot?: string): Promise<{
     files: RemoteEntry[];
     folders: Map<string, string>;
     rejected: string[];
+    unsupported: string[];
   }> {
-    if (!this.rootId) throw new DriveError("Drive root folder is not configured.", 0);
-
-    const all: DriveFile[] = [];
-    let pageToken: string | undefined;
-
-    do {
-      const url =
-        `${API}/files?q=${encodeURIComponent("trashed=false")}` +
-        `&fields=${encodeURIComponent(`nextPageToken,files(${FILE_FIELDS})`)}` +
-        `&pageSize=1000&spaces=drive` +
-        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
-      const page = await this.json<{ files: DriveFile[]; nextPageToken?: string }>({ url });
-      all.push(...(page.files ?? []));
-      pageToken = page.nextPageToken;
-    } while (pageToken);
-
-    const byId = new Map<string, DriveFile>();
-    for (const f of all) byId.set(f.id, f);
-
-    // Resolve each node's path by walking up to the root folder.
-    const pathCache = new Map<string, string | null>([[this.rootId, ""]]);
-    const pathOf = (id: string): string | null => {
-      const seen: string[] = [];
-      let cur: string | undefined = id;
-      let resolved: string | null = null;
-
-      while (cur) {
-        const cached = pathCache.get(cur);
-        if (cached !== undefined) {
-          resolved = cached;
-          break;
-        }
-        const node = byId.get(cur);
-        if (!node) return null; // parent is outside our scope
-        seen.push(cur);
-        cur = node.parents?.[0];
-        if (seen.length > 256) return null; // cycle guard
-      }
-      if (resolved === null && cur !== this.rootId) {
-        for (const id2 of seen) pathCache.set(id2, null);
-        return null;
-      }
-
-      let acc = resolved ?? "";
-      for (let i = seen.length - 1; i >= 0; i--) {
-        const node = byId.get(seen[i]);
-        if (!node) return null;
-        acc = joinPath(acc, nfc(node.name));
-        pathCache.set(seen[i], acc);
-      }
-      return acc;
-    };
-
-    const files: RemoteEntry[] = [];
-    const folders = new Map<string, string>([["", this.rootId]]);
-    const rejected: string[] = [];
-
-    for (const f of all) {
-      const p = pathOf(f.id);
-      if (p === null || p === "") continue;
-      // A Drive name containing `/` or `..` would escape the vault on write.
-      if (!isSafeVaultPath(p)) {
-        rejected.push(p);
-        continue;
-      }
-      if (f.mimeType === FOLDER_MIME) {
-        folders.set(p, f.id);
-        continue;
-      }
-      files.push({
-        path: p,
-        id: f.id,
-        md5: f.md5Checksum ?? null,
-        size: f.size ? Number(f.size) : 0,
-        modifiedTime: f.modifiedTime ? Date.parse(f.modifiedTime) : 0,
-      });
+    const rootId = this.rootId;
+    if (!rootId) throw new DriveError("Drive root folder is not configured.", 0);
+    // The caller's index belongs to the root it started with; listing another
+    // folder against it would read every tracked file as deleted remotely.
+    if (expectedRoot !== undefined && rootId !== expectedRoot) {
+      throw new DriveError("The Drive folder changed during the sync; run it again.", 0);
     }
 
+    const files: RemoteEntry[] = [];
+    const folders = new Map<string, string>([["", rootId]]);
+    const rejected: string[] = [];
+    const unsupported: string[] = [];
+    const queue: { path: string; id: string }[] = [{ path: "", id: rootId }];
+
+    const listFolder = async (dir: { path: string; id: string }): Promise<void> => {
+      this.log.debug("listing folder", dir.path || "/");
+      let pageToken: string | undefined;
+      do {
+        const url =
+          `${API}/files?q=${encodeURIComponent(`'${q(dir.id)}' in parents and trashed=false`)}` +
+          `&fields=${encodeURIComponent(`nextPageToken,files(${FILE_FIELDS})`)}` +
+          `&pageSize=1000&${ALL_DRIVES_LIST}` +
+          (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+        const page = await this.json<{ files?: DriveFile[]; nextPageToken?: string }>({ url });
+
+        for (const f of page.files ?? []) {
+          const p = joinPath(dir.path, nfc(f.name));
+          // A Drive name containing `/` or `..` would escape the vault on write;
+          // nothing below such a folder is walked either.
+          if (!isSafeVaultPath(p)) {
+            rejected.push(p);
+            continue;
+          }
+          if (f.mimeType === FOLDER_MIME) {
+            folders.set(p, f.id);
+            queue.push({ path: p, id: f.id });
+            continue;
+          }
+          // Docs, Sheets and shortcuts have no bytes; `alt=media` would fail every sync.
+          if (f.mimeType?.startsWith(GOOGLE_APPS_PREFIX)) {
+            unsupported.push(p);
+            continue;
+          }
+          files.push({
+            path: p,
+            id: f.id,
+            md5: f.md5Checksum ?? null,
+            size: f.size ? Number(f.size) : 0,
+            modifiedTime: f.modifiedTime ? Date.parse(f.modifiedTime) : 0,
+          });
+        }
+        pageToken = page.nextPageToken;
+      } while (pageToken);
+    };
+
+    const limit = Math.max(1, Math.floor(concurrency) || 1);
+    await new Promise<void>((resolve, reject) => {
+      let active = 0;
+      let failed = false;
+      const pump = (): void => {
+        if (failed) return;
+        if (queue.length === 0 && active === 0) {
+          resolve();
+          return;
+        }
+        while (active < limit && queue.length > 0) {
+          const next = queue.shift()!;
+          active++;
+          listFolder(next).then(
+            () => {
+              active--;
+              pump();
+            },
+            (e) => {
+              failed = true;
+              reject(e);
+            },
+          );
+        }
+      };
+      pump();
+    });
+
+    // A pin or unpin committed mid-walk: this map belongs to the old root.
+    if (this.rootId !== rootId) {
+      throw new DriveError("The Drive folder changed during the sync; run it again.", 0);
+    }
     this.folderIds = folders;
-    return { files, folders, rejected };
+    this.listed = true;
+    return { files, folders, rejected, unsupported };
   }
 
   // -------------------------------------------------------------------- changes
@@ -343,30 +424,48 @@ export class DriveClient {
   /** Cheap "did anything change remotely?" poll, so a full sweep is only run when needed. */
   async getStartPageToken(): Promise<string> {
     const res = await this.json<{ startPageToken: string }>({
-      url: `${API}/changes/startPageToken`,
+      url: `${API}/changes/startPageToken?${ALL_DRIVES}`,
     });
     return res.startPageToken;
   }
 
-  async hasChangesSince(pageToken: string): Promise<{ changed: boolean; nextToken: string }> {
+  /**
+   * The feed covers the whole account, so `isRelevant` decides which changes
+   * touch the synced tree. It sees every change, not just until the first hit.
+   * Without a predicate any change counts, as before the scope widened.
+   */
+  async hasChangesSince(
+    pageToken: string,
+    isRelevant: (change: DriveChange) => boolean = () => true,
+  ): Promise<{ changed: boolean; nextToken: string }> {
+    this.log.debug("probing changes");
     let token = pageToken;
     let changed = false;
 
+    const done = (nextToken: string) => {
+      this.log.debug(changed ? "relevant change seen" : "no relevant changes");
+      return { changed, nextToken };
+    };
+
     for (;;) {
       const page = await this.json<{
-        changes?: unknown[];
+        changes?: DriveChange[];
         nextPageToken?: string;
         newStartPageToken?: string;
       }>({
         url:
           `${API}/changes?pageToken=${encodeURIComponent(token)}` +
-          `&fields=${encodeURIComponent("nextPageToken,newStartPageToken,changes(fileId,removed)")}` +
-          `&pageSize=100&spaces=drive&includeRemoved=true`,
+          `&fields=${encodeURIComponent(
+            "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,parents,trashed))",
+          )}` +
+          `&pageSize=100&spaces=drive&includeRemoved=true&${ALL_DRIVES_LIST}`,
       });
 
-      if ((page.changes?.length ?? 0) > 0) changed = true;
-      if (page.newStartPageToken) return { changed, nextToken: page.newStartPageToken };
-      if (!page.nextPageToken) return { changed, nextToken: token };
+      for (const change of page.changes ?? []) {
+        if (isRelevant(change)) changed = true;
+      }
+      if (page.newStartPageToken) return done(page.newStartPageToken);
+      if (!page.nextPageToken) return done(token);
       token = page.nextPageToken;
     }
   }
@@ -374,13 +473,13 @@ export class DriveClient {
   // -------------------------------------------------------------------- content
 
   async download(fileId: string): Promise<ArrayBuffer> {
-    const res = await this.call({ url: `${API}/files/${fileId}?alt=media` });
+    const res = await this.call({ url: `${API}/files/${fileId}?alt=media&${ALL_DRIVES}` });
     return res.arrayBuffer;
   }
 
   async trash(fileId: string): Promise<void> {
     await this.call({
-      url: `${API}/files/${fileId}`,
+      url: `${API}/files/${fileId}?${ALL_DRIVES}`,
       method: "PATCH",
       contentType: "application/json",
       body: JSON.stringify({ trashed: true }),
@@ -424,8 +523,8 @@ export class DriveClient {
     ]);
 
     const url = opts.fileId
-      ? `${UPLOAD}/${opts.fileId}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}`
-      : `${UPLOAD}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}`;
+      ? `${UPLOAD}/${opts.fileId}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}&${ALL_DRIVES}`
+      : `${UPLOAD}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}&${ALL_DRIVES}`;
 
     return this.json<DriveFile>({
       url,
@@ -446,8 +545,8 @@ export class DriveClient {
     if (opts.parentId) metadata.parents = [opts.parentId];
 
     const initUrl = opts.fileId
-      ? `${UPLOAD}/${opts.fileId}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}`
-      : `${UPLOAD}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}`;
+      ? `${UPLOAD}/${opts.fileId}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}&${ALL_DRIVES}`
+      : `${UPLOAD}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}&${ALL_DRIVES}`;
 
     const init = await this.call({
       url: initUrl,

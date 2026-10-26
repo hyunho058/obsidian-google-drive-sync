@@ -1,4 +1,5 @@
 import { DataAdapter, Notice } from "obsidian";
+import { AuthError } from "../auth/oauth";
 import { DriveClient } from "../drive/client";
 import { RemoteEntry } from "../drive/types";
 import { md5 } from "../util/md5";
@@ -20,6 +21,12 @@ export interface EngineOptions {
   /** Abort rather than apply a deletion wave larger than this fraction of the index. */
   deletionGuardRatio: number;
   concurrency: number;
+  /**
+   * The Drive root the caller started this sync against. The vault scan runs
+   * before the remote listing, so a folder pinned in between would otherwise
+   * compare this index with a different folder and read its files as deleted.
+   */
+  expectedRoot?: string;
 }
 
 export interface SyncReport {
@@ -114,8 +121,17 @@ export class SyncEngine {
     };
 
     const local = await this.scanLocal(filter);
-    const { files, rejected } = await this.drive.listTree();
+    const listing = await this.drive.listTree(opts.concurrency, opts.expectedRoot);
+    const { files, rejected } = listing;
     report.rejected.push(...rejected);
+
+    // Google-native files (Docs, Sheets, …) and shortcuts have no bytes to
+    // download. Name them once in the report; they never enter the index.
+    // Older or fake drives may not return the field at all.
+    for (const p of listing.unsupported ?? []) {
+      if (filter.excludes(p)) continue;
+      report.skipped.push(`${p} (Google Docs, Sheets and similar files are not synced)`);
+    }
 
     const remote = new Map<string, RemoteEntry>();
     const collisions = new Map<string, string>();
@@ -136,7 +152,14 @@ export class SyncEngine {
     // it: its index entry is kept as is and it takes no part in the deletion
     // guard or in reconciling, so it is neither counted nor acted on as a
     // remote delete (Windows refuses names that earlier versions accepted).
-    const held = new Set(rejected);
+    // A Google-native item at a tracked path is held the same way: its path is
+    // occupied in Drive, so the vault copy must not be trashed as "deleted there".
+    // A refused *folder* is not listed, so everything tracked under it is held too.
+    const heldExact = new Set([...rejected, ...(listing.unsupported ?? [])]);
+    const heldPrefixes = rejected.map((r) => `${r}/`);
+    const held = {
+      has: (p: string): boolean => heldExact.has(p) || heldPrefixes.some((pre) => p.startsWith(pre)),
+    };
 
     const next: SyncIndex = { ...index };
     const paths = new Set<string>(
@@ -359,7 +382,25 @@ export class SyncEngine {
     next: SyncIndex,
     report: SyncReport,
   ): Promise<void> {
-    await this.drive.trash(remote.id);
+    try {
+      await this.drive.trash(remote.id);
+    } catch (e) {
+      // A 403 AuthError is a permission refusal (throttled 403s arrive as a
+      // DriveError): in a shared folder a non-owner cannot trash someone else's
+      // file. Retrying would fail on every sync, so drop the entry instead —
+      // the next sync sees it as remote-only and downloads it again, so nothing
+      // is lost. Any other failure rethrows and keeps today's error path
+      // (reported, entry kept, retried next time).
+      if (e instanceof AuthError && e.status === 403) {
+        delete next[path];
+        report.skipped.push(
+          `${path} (can't delete in Drive: you don't own this file; it will come back on the next sync)`,
+        );
+        this.log.debug("remote delete refused", path);
+        return;
+      }
+      throw e;
+    }
     delete next[path];
     report.deletedRemote++;
     this.log.debug("trashed remotely", path);

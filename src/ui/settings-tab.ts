@@ -4,6 +4,7 @@ import { runLoopbackFlow } from "../auth/loopback";
 import { CredentialSaveError } from "../auth/credential-store";
 import { describeError } from "../util/log";
 import { effectiveExcludes } from "../settings";
+import { FolderLinkPlan, MSG_SYNC_RUNNING, parseFolderRef, planFolderLink, rootProblem } from "../drive/folder-ref";
 
 export class GDriveSyncSettingTab extends PluginSettingTab {
   constructor(
@@ -65,8 +66,9 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
     warn.appendText(
       "set the OAuth consent screen to 'In production', not 'Testing'. Testing-mode " +
         "refresh tokens expire after 7 days and sync will break with an invalid_grant " +
-        "error. The drive.file scope this plugin uses is non-sensitive, so publishing " +
-        "needs no verification review.",
+        "error. Because the client is your own and unverified, Google shows " +
+        "\"Google hasn't verified this app\" when you sign in: choose Advanced, then " +
+        "continue to your app.",
     );
 
     new Setting(root)
@@ -85,7 +87,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       .setName("Client secret")
       .setDesc(
         "Desktop-app client secrets are not treated as confidential by Google, but this " +
-          "one still grants access to your Drive folder — keep it off shared vaults.",
+          "one, together with your sign-in, grants access to your whole Google Drive — keep it off shared vaults.",
       )
       .addText((t) => {
         t.inputEl.type = "password";
@@ -194,10 +196,12 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       this.plugin.signInRestored();
       this.plugin.tokens.invalidate();
       this.plugin.drive.resetCache();
+      this.plugin.forgetVerifiedRoot();
       await this.plugin.ensureRoot();
       new Notice("Signed in to Google Drive.");
       this.display();
-      void this.plugin.syncNow("command");
+      // The first sync verifies a folder pinned before sign-in; show its name or the old-sign-in hint.
+      void this.plugin.syncNow("command").then(() => this.display());
     } catch (e) {
       new Notice(`Sign-in failed: ${describeError(e)}`, 15000);
     }
@@ -244,21 +248,33 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
   private renderSyncBehaviour(root: HTMLElement): void {
     new Setting(root).setName("Sync").setHeading();
 
-    new Setting(root)
+    const nameSetting = new Setting(root)
       .setName("Drive folder name")
-      .setDesc("Folder created at the root of your Drive. Changing this starts a fresh remote copy.")
       .addText((t) =>
         t.setValue(this.plugin.settings.rootFolderName).onChange(async (v) => {
           const name = v.trim();
           if (!name || name === this.plugin.settings.rootFolderName) return;
           this.plugin.settings.rootFolderName = name;
-          this.plugin.settings.rootFolderId = "";
-          this.plugin.settings.index = {};
-          this.plugin.settings.changeToken = "";
-          this.plugin.drive.resetCache();
+          // While a link is pinned the name is only kept for a later unpin; the root is unchanged.
+          if (!this.plugin.settings.rootFolderLink) {
+            this.plugin.settings.rootFolderId = "";
+            this.plugin.settings.index = {};
+            this.plugin.settings.changeToken = "";
+            this.plugin.drive.resetCache();
+            this.plugin.forgetVerifiedRoot();
+          }
           await this.plugin.saveSettings();
         }),
       );
+    const describeName = () =>
+      nameSetting.setDesc(
+        this.plugin.settings.rootFolderLink
+          ? "Not used while a Drive folder link is set below. Clear the link to sync with this folder again."
+          : "Folder created at the root of your Drive. Changing this starts a fresh remote copy.",
+      );
+    describeName();
+
+    this.renderFolderLink(root, describeName);
 
     new Setting(root)
       .setName("Sync automatically")
@@ -308,6 +324,181 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+  }
+
+  /**
+   * The folder link commits on blur or Enter, never per keystroke: each
+   * commit may ask Google about the folder and may reset the baseline.
+   */
+  private renderFolderLink(root: HTMLElement, describeName: () => void): void {
+    const setting = new Setting(root).setName("Drive folder link or ID");
+
+    const describe = (refusal: string | null) => {
+      const s = this.plugin.settings;
+      const desc = setting.descEl;
+      desc.empty();
+      if (refusal !== null) {
+        desc.createDiv({ cls: "gdvs-error-text", text: refusal });
+      } else if (s.rootFolderLinkName) {
+        desc.createDiv({ text: `Linked to "${s.rootFolderLinkName}"` });
+      } else if (s.rootFolderLink) {
+        desc.createDiv({ text: "Will be checked at the first sync" });
+      } else {
+        desc.createDiv({
+          text:
+            "Paste a drive.google.com folder link to sync with a folder shared with you. " +
+            "Leave empty to use the folder name above.",
+        });
+      }
+      const hint = this.plugin.scopeHint();
+      // A 404 refusal already ends with the hint.
+      if (hint !== null && !(refusal ?? "").endsWith(hint)) desc.createDiv({ text: hint });
+    };
+    describe(null);
+
+    setting.addText((t) => {
+      t.setPlaceholder("https://drive.google.com/drive/folders/…").setValue(this.plugin.settings.rootFolderLink);
+      const input = t.inputEl;
+      input.addClass("gdvs-full-width");
+      // Enter is followed by a blur when the user leaves the field; that blur
+      // must not check (or refuse) the same text again. Enter itself may
+      // retry, e.g. after a network failure.
+      let lastCommitted: string | null = null;
+      let busy = false;
+      // A commit that arrives while a check is in flight runs once that check
+      // ends, so text edited during the check is never silently left unsaved.
+      let pending = false;
+      const commit = async (retry: boolean): Promise<void> => {
+        const text = input.value.trim();
+        if (busy) {
+          pending = true;
+          return;
+        }
+        if (!retry && text === lastCommitted) return;
+        lastCommitted = text;
+        busy = true;
+        try {
+          const refusal = await this.commitFolderLink(text);
+          describe(refusal);
+          describeName();
+        } finally {
+          busy = false;
+          if (pending) {
+            pending = false;
+            void commit(false);
+          }
+        }
+      };
+      input.addEventListener("input", () => {
+        lastCommitted = null;
+      });
+      input.addEventListener("blur", () => void commit(false));
+      input.addEventListener("keydown", (e) => {
+        // isComposing: Enter that confirms an IME syllable is not a commit.
+        if (e.key === "Enter" && !e.isComposing) {
+          e.preventDefault();
+          void commit(true);
+        }
+      });
+    });
+  }
+
+  /** Decides and applies a committed folder link. Returns the refusal shown under the field, or null. */
+  private async commitFolderLink(text: string): Promise<string | null> {
+    const s = this.plugin.settings;
+    const current = { rootFolderLink: s.rootFolderLink, rootFolderId: s.rootFolderId };
+    const linked = this.plugin.isLinked();
+
+    // Everything but "ask Google" is decided without a call: unchanged text,
+    // unparseable text, an empty field, or no sign-in to ask with.
+    let plan: FolderLinkPlan = planFolderLink(current, text, null, linked);
+    if (plan.kind === "defer" && linked) {
+      const id = plan.id;
+      try {
+        const inspection = await this.plugin.drive.inspectFolder(id);
+        plan = planFolderLink(current, text, inspection, true);
+      } catch (error) {
+        plan = {
+          kind: "refuse",
+          message: rootProblem({ error }, false, this.plugin.scopeHint()) ?? "Couldn't check this folder.",
+        };
+      }
+      // A setup token linked meanwhile replaced the root; this answer is about the old state.
+      if (s.rootFolderLink !== current.rootFolderLink || s.rootFolderId !== current.rootFolderId) return null;
+    }
+
+    // Anything that moves the root waits for a running sync to finish; its index
+    // describes the old folder and would otherwise be written over the new one.
+    const movesRoot =
+      plan.kind === "unpin" ||
+      (plan.kind === "pin" && plan.resetBaseline) ||
+      (plan.kind === "defer" && plan.id !== current.rootFolderId);
+    if (movesRoot && this.plugin.isSyncing()) plan = { kind: "refuse", message: MSG_SYNC_RUNNING };
+
+    try {
+      switch (plan.kind) {
+        case "noop":
+          return null;
+        case "refuse":
+          new Notice(plan.message);
+          return plan.message;
+        case "pin": {
+          const { id, name, resetBaseline } = plan;
+          await this.plugin.commitSettings(() => {
+            s.rootFolderLink = text;
+            s.rootFolderId = id;
+            s.rootFolderLinkName = name;
+            if (resetBaseline) {
+              s.index = {};
+              s.changeToken = "";
+            }
+          });
+          if (resetBaseline) {
+            this.plugin.drive.resetCache();
+            this.plugin.drive.setRoot(id);
+          }
+          // Verified just now; the next sync checks again anyway, which costs one call.
+          this.plugin.forgetVerifiedRoot();
+          return null;
+        }
+        case "unpin":
+          await this.plugin.commitSettings(() => {
+            s.rootFolderLink = "";
+            s.rootFolderId = "";
+            s.rootFolderLinkName = "";
+            s.index = {};
+            s.changeToken = "";
+          });
+          this.plugin.drive.resetCache();
+          this.plugin.forgetVerifiedRoot();
+          return null;
+        case "defer": {
+          const { id } = plan;
+          // The folder already in use keeps its baseline, as a pin of it does (D2).
+          const sameRoot = id === current.rootFolderId;
+          await this.plugin.commitSettings(() => {
+            s.rootFolderLink = text;
+            s.rootFolderId = id;
+            s.rootFolderLinkName = "";
+            if (!sameRoot) {
+              s.index = {};
+              s.changeToken = "";
+            }
+          });
+          if (!sameRoot) {
+            this.plugin.drive.resetCache();
+            this.plugin.drive.setRoot(id);
+          }
+          this.plugin.forgetVerifiedRoot();
+          return null;
+        }
+      }
+    } catch (e) {
+      // The save failed and the settings were put back; the client was not touched.
+      const message = `Couldn't save the folder: ${describeError(e)}`;
+      new Notice(message);
+      return message;
+    }
   }
 
   private renderScope(root: HTMLElement): void {

@@ -33,6 +33,10 @@ const GCM_TAG_BYTES = 16;
 export interface LinkPayload extends Credentials {
   folderId?: string;
   folderName?: string;
+  /** The pinned folder's link or ID as typed (`rootFolderLink`); "" when not pinned. */
+  folderLink?: string;
+  /** The pinned folder's verified name (`rootFolderLinkName`); "" when not verified yet. */
+  folderLinkName?: string;
 }
 
 export type TokenCheck = "complete" | "incomplete" | "old-token" | "damaged";
@@ -210,17 +214,21 @@ async function deriveKey(
   );
 }
 
-/** Only the five known fields; null unless the three credentials are non-empty strings. */
+/** Only the seven known fields; null unless the three credentials are non-empty strings. */
 function toLinkPayload(obj: Record<string, unknown> | null): LinkPayload | null {
   if (!obj) return null;
-  const { clientId, clientSecret, refreshToken, folderId, folderName } = obj;
+  const { clientId, clientSecret, refreshToken, folderId, folderName, folderLink, folderLinkName } = obj;
   const filled = (v: unknown): v is string => typeof v === "string" && v.length > 0;
   if (!filled(clientId) || !filled(clientSecret) || !filled(refreshToken)) return null;
   if (folderId !== undefined && typeof folderId !== "string") return null;
   if (folderName !== undefined && typeof folderName !== "string") return null;
+  if (folderLink !== undefined && typeof folderLink !== "string") return null;
+  if (folderLinkName !== undefined && typeof folderLinkName !== "string") return null;
   const p: LinkPayload = { clientId, clientSecret, refreshToken };
   if (folderId !== undefined) p.folderId = folderId;
   if (folderName !== undefined) p.folderName = folderName;
+  if (folderLink !== undefined) p.folderLink = folderLink;
+  if (folderLinkName !== undefined) p.folderLinkName = folderLinkName;
   return p;
 }
 
@@ -239,6 +247,8 @@ export async function encryptSetupToken(payload: LinkPayload): Promise<{ token: 
   };
   if (typeof payload.folderId === "string") inner.folderId = payload.folderId;
   if (typeof payload.folderName === "string") inner.folderName = payload.folderName;
+  if (typeof payload.folderLink === "string") inner.folderLink = payload.folderLink;
+  if (typeof payload.folderLinkName === "string") inner.folderLinkName = payload.folderLinkName;
 
   const key = await deriveKey(code, salt, ITERATIONS, "encrypt");
   const ct = await crypto.subtle.encrypt(

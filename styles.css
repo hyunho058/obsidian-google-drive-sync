@@ -44,3 +44,7 @@
 .gdvs-error:empty {
   display: none;
 }
+
+.gdvs-error-text {
+  color: var(--text-error);
+}
