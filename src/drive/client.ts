@@ -70,6 +70,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * Without these Google hides Shared Drive content even under full scope, so
  * every files and changes request carries them; lists also need the second.
  */
+/** The sync root moved (pin, unpin, rename) while a sync was using it. */
+export const MSG_ROOT_CHANGED = "The Drive folder changed during the sync; run it again.";
+
 const ALL_DRIVES = "supportsAllDrives=true";
 const ALL_DRIVES_LIST = "supportsAllDrives=true&includeItemsFromAllDrives=true";
 
@@ -332,7 +335,7 @@ export class DriveClient {
     // The caller's index belongs to the root it started with; listing another
     // folder against it would read every tracked file as deleted remotely.
     if (expectedRoot !== undefined && rootId !== expectedRoot) {
-      throw new DriveError("The Drive folder changed during the sync; run it again.", 0);
+      throw new DriveError(MSG_ROOT_CHANGED, 0);
     }
 
     const files: RemoteEntry[] = [];
@@ -347,10 +350,18 @@ export class DriveClient {
       do {
         const url =
           `${API}/files?q=${encodeURIComponent(`'${q(dir.id)}' in parents and trashed=false`)}` +
-          `&fields=${encodeURIComponent(`nextPageToken,files(${FILE_FIELDS})`)}` +
+          `&fields=${encodeURIComponent(`nextPageToken,incompleteSearch,files(${FILE_FIELDS})`)}` +
           `&pageSize=1000&${ALL_DRIVES_LIST}` +
           (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
-        const page = await this.json<{ files?: DriveFile[]; nextPageToken?: string }>({ url });
+        const page = await this.json<{
+          files?: DriveFile[];
+          nextPageToken?: string;
+          incompleteSearch?: boolean;
+        }>({ url });
+        // A partial page would read the missing files as deleted in Drive.
+        if (page.incompleteSearch) {
+          throw new DriveError("Google Drive returned an incomplete folder listing; nothing was changed. Try again.", 0);
+        }
 
         for (const f of page.files ?? []) {
           const p = joinPath(dir.path, nfc(f.name));
@@ -412,7 +423,7 @@ export class DriveClient {
 
     // A pin or unpin committed mid-walk: this map belongs to the old root.
     if (this.rootId !== rootId) {
-      throw new DriveError("The Drive folder changed during the sync; run it again.", 0);
+      throw new DriveError(MSG_ROOT_CHANGED, 0);
     }
     this.folderIds = folders;
     this.listed = true;

@@ -250,9 +250,8 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 ## Known limits
 
 - **Google Docs, Sheets and Slides are skipped.** These files (and Drive shortcuts)
-  have no file content to download, so sync leaves them alone in Drive. The first sync that
-  finds one says so in a notice, and the developer console names each one once per
-  session.
+  have no file content to download, so sync leaves them alone in Drive. A notice counts
+  them as skipped, and the developer console names each one once per session.
 - **Files owned by someone else cannot be deleted from Drive by you.** In a shared
   folder, deleting such a file here does not remove it from Drive; the next sync
   brings it back. Ask its owner to delete it.

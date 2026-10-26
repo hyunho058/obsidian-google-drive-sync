@@ -2,7 +2,7 @@ import { Notice, Platform, Plugin, TAbstractFile, debounce } from "obsidian";
 import { AuthError, Credentials, TokenManager, verifyCredentials } from "./auth/oauth";
 import { CredentialStore, adoptPersistedMarks, appSessionSet } from "./auth/credential-store";
 import { LinkPayload, encryptSetupToken } from "./auth/setup-token";
-import { DriveClient, DriveError } from "./drive/client";
+import { DriveClient, DriveError, MSG_ROOT_CHANGED } from "./drive/client";
 import { MSG_SYNC_RUNNING, rootProblem } from "./drive/folder-ref";
 import type { FolderInspection } from "./drive/types";
 import { DEFAULT_SETTINGS, Settings, applyLinkedFolder, cloneSettings, effectiveExcludes } from "./settings";
@@ -471,6 +471,8 @@ export default class GDriveSyncPlugin extends Plugin {
       if (this.drive.getRoot() !== root || this.settings.rootFolderId !== root) {
         this.localDirty = true;
         this.log.debug("sync root changed during the run; result discarded");
+        // No automatic rerun: the root moves on each keystroke in the folder-name field.
+        new Notice(MSG_ROOT_CHANGED, 8000);
         this.setStatus("Drive: idle");
         return;
       }
@@ -578,7 +580,7 @@ export default class GDriveSyncPlugin extends Plugin {
       throw new DriveError(problem, 0);
     }
     // The pin may have changed while Google answered; that one gets its own check.
-    if (this.drive.getRoot() !== root || this.settings.rootFolderId !== id) return;
+    if (id !== root || this.drive.getRoot() !== root || this.settings.rootFolderId !== root) return;
     this.verifiedRoot = root;
     if (this.settings.rootFolderLinkName === "" && "name" in inspection) {
       this.settings.rootFolderLinkName = inspection.name;
@@ -588,9 +590,19 @@ export default class GDriveSyncPlugin extends Plugin {
 
   async ensureRoot(): Promise<void> {
     if (this.drive.getRoot()) return;
-    const id = this.settings.rootFolderId
-      ? this.settings.rootFolderId
-      : await this.drive.ensureRootFolder(this.settings.rootFolderName);
+    let id = this.settings.rootFolderId;
+    if (!id) {
+      const name = this.settings.rootFolderName;
+      id = await this.drive.ensureRootFolder(name);
+      // The name was edited, or a folder pinned, while Google answered. That
+      // change already reset the root, so this folder must not overwrite it.
+      if (this.settings.rootFolderName !== name || this.settings.rootFolderId) {
+        this.drive.resetCache();
+        if (this.settings.rootFolderId) this.drive.setRoot(this.settings.rootFolderId);
+        this.forgetVerifiedRoot();
+        throw new DriveError(MSG_ROOT_CHANGED, 0);
+      }
+    }
     this.drive.setRoot(id);
     this.forgetVerifiedRoot();
     if (this.settings.rootFolderId !== id) {

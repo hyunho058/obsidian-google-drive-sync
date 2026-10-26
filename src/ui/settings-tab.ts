@@ -4,6 +4,7 @@ import { runLoopbackFlow } from "../auth/loopback";
 import { CredentialSaveError } from "../auth/credential-store";
 import { describeError } from "../util/log";
 import { effectiveExcludes } from "../settings";
+import { MSG_ROOT_CHANGED } from "../drive/client";
 import { FolderLinkPlan, MSG_SYNC_RUNNING, parseFolderRef, planFolderLink, rootProblem } from "../drive/folder-ref";
 
 export class GDriveSyncSettingTab extends PluginSettingTab {
@@ -197,7 +198,10 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       this.plugin.tokens.invalidate();
       this.plugin.drive.resetCache();
       this.plugin.forgetVerifiedRoot();
-      await this.plugin.ensureRoot();
+      // A folder edit during this wait is not a failed sign-in; the sync below finds the new folder.
+      await this.plugin.ensureRoot().catch((e: unknown) => {
+        if (!(e instanceof Error && e.message === MSG_ROOT_CHANGED)) throw e;
+      });
       new Notice("Signed in to Google Drive.");
       this.display();
       // The first sync verifies a folder pinned before sign-in; show its name or the old-sign-in hint.

@@ -1,5 +1,6 @@
-// Regression tests for the three defects the verification loop's Gate-3 checker
-// found after the shared-folder build (specs/shared-folder-sync/loop.md, lessons L1–L3).
+// Regression tests for defects the verification loop's Gate-3 checker found
+// after the shared-folder build (specs/shared-folder-sync/loop.md, lessons L1–L3),
+// and for its follow-ups.
 
 import { DataAdapter } from "obsidian";
 import { AuthError, TokenManager } from "../src/auth/oauth";
@@ -163,6 +164,20 @@ test("L3 a token-endpoint 403 never reaches Drive callers as a permission 403", 
   assert(err instanceof AuthError, `not an AuthError: ${err.name}`);
   eq((err as AuthError).status, undefined, "status");
   eq(err.message, "Token request failed (403): access_denied", "message");
+});
+
+test("listTree throws when Drive flags a folder listing as incomplete", async () => {
+  setRequestUrlHandler(async () => ({
+    status: 200,
+    json: { files: [], incompleteSearch: true },
+    text: "",
+    headers: {},
+  }));
+  const c = client();
+  c.setRoot("ROOT");
+  const err = await rejects(() => c.listTree(4, "ROOT"), "listTree with an incomplete page");
+  assert(err instanceof DriveError, `not a DriveError: ${err.name}`);
+  eq(c.hasListed(), false, "hasListed");
 });
 
 void run().finally(() => setRequestUrlHandler(null));
