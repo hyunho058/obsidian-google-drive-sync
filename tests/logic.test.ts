@@ -1,3 +1,4 @@
+import { Platform } from "obsidian";
 import {
   PathFilter,
   canonical,
@@ -8,7 +9,7 @@ import {
   mimeFor,
   nfc,
 } from "../src/util/paths";
-import { effectiveExcludes } from "../src/settings";
+import { DEFAULT_SETTINGS, cloneSettings, effectiveExcludes } from "../src/settings";
 import { escapeHtml } from "../src/auth/loopback";
 import { md5 } from "../src/util/md5";
 
@@ -106,6 +107,39 @@ for (const good of [
   "folder..name/x.md",
 ]) {
   ok(`accepts ordinary path: ${JSON.stringify(good)}`, isSafeVaultPath(good));
+}
+
+// Windows drops a trailing dot or space and maps device names, so these would
+// land somewhere other than their name says. Elsewhere they are ordinary names.
+for (const evil of [
+  ".obsidian./plugins/x/main.js",
+  ".git /hooks/pre-commit",
+  "notes/CON",
+  "notes/nul.md",
+  "notes/Com1.txt",
+  "notes/LPT9 .md",
+  "notes/a:stream.md",
+  "notes/what?.md",
+  'notes/"quoted".md',
+  "notes/a|b.md",
+]) {
+  ok(`rejects on Windows: ${JSON.stringify(evil)}`, !isSafeVaultPath(evil, true));
+  ok(`accepts off Windows: ${JSON.stringify(evil)}`, isSafeVaultPath(evil));
+}
+// With no flag, the rule follows the platform, so every caller agrees.
+Platform.isWin = true;
+ok("defaults to the Windows rules on Windows", !isSafeVaultPath("notes/CON"));
+Platform.isWin = false;
+ok("defaults to the plain rules elsewhere", isSafeVaultPath("notes/CON"));
+
+for (const good of ["notes/console.md", "notes/nullable.md", "notes/com10.md", "file.with.dots.md", "..hidden-but-fine.md"]) {
+  ok(`accepts on Windows: ${JSON.stringify(good)}`, isSafeVaultPath(good, true));
+}
+
+{
+  const copy = cloneSettings(DEFAULT_SETTINGS);
+  check("cloneSettings copies the values", copy, DEFAULT_SETTINGS);
+  ok("cloneSettings shares no arrays with the original", copy.exclude !== DEFAULT_SETTINGS.exclude);
 }
 
 ok("NFD input is judged after normalization", isSafeVaultPath(`notes/${KOREAN_NFD}.md`));

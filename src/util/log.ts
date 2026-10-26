@@ -7,10 +7,6 @@ export class Logger {
     if (this.verbose()) console.log(PREFIX, ...args);
   }
 
-  info(...args: unknown[]): void {
-    console.log(PREFIX, ...args);
-  }
-
   warn(...args: unknown[]): void {
     console.warn(PREFIX, ...args);
   }

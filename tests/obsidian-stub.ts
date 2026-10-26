@@ -14,3 +14,6 @@ export function requestUrl(req: unknown): Promise<unknown> {
 }
 
 export class Notice {}
+
+/** Tests run as a non-Windows platform; Windows rules are tested by passing the flag. */
+export const Platform = { isWin: false };

@@ -94,6 +94,15 @@ export const DEFAULT_SETTINGS: Settings = {
  * the plugin was installed — a hardcoded guess that misses would upload the
  * credentials to Drive and to every linked device.
  */
+/**
+ * A deep copy, so the copy never shares an array or object with the original.
+ * A JSON round-trip on purpose: settings are saved as JSON, so the copy holds
+ * exactly what would be saved.
+ */
+export function cloneSettings(s: Settings): Settings {
+  return JSON.parse(JSON.stringify(s)) as Settings;
+}
+
 export function effectiveExcludes(s: Settings, pluginDir: string, configDir: string): string[] {
   const base = [...hardExcludes(configDir), ...s.exclude, `${pluginDir}/`];
   if (!s.syncConfigFolder) base.push(`${configDir}/`);

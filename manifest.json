@@ -1,9 +1,10 @@
 {
   "id": "gdrive-vault-sync",
-  "name": "Google Drive Vault Sync",
+  "name": "Vault Sync for Google Drive",
   "version": "0.2.2",
   "minAppVersion": "1.11.4",
   "description": "Two-way sync between your vault and Google Drive using your own Google credentials. Works on desktop and iOS.",
   "author": "hyunhokim",
+  "authorUrl": "https://github.com/hyunho058",
   "isDesktopOnly": false
 }
