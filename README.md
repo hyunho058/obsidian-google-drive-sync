@@ -3,7 +3,8 @@
 Two-way sync between an Obsidian vault and Google Drive, using **your own** Google
 credentials. No third-party server is involved: your devices talk to Google directly.
 
-Built for a Mac + iPhone pair, which is the combination that shapes most of the design.
+Tested on macOS and iOS. Windows and Linux use the same desktop sign-in as macOS.
+Android should work the same way as iOS but has not been tested yet.
 
 ## Disclosures
 
@@ -22,14 +23,14 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
 ## How it works
 
 - **Scope:** full Google Drive access (`https://www.googleapis.com/auth/drive`).
-  Up to version 0.2.x the plugin used to request `drive.file`, which only sees files
-  the app itself created or opened. That could not see a folder someone shared with
-  you, nor files a collaborator adds to it later, and the Google Picker that would
-  widen it file by file does not run inside Obsidian on iOS. Full Drive is a Google *restricted*
-  scope. The cost is the blast radius: a leaked refresh token, or a setup token
-  leaked together with its code, can now reach your whole Drive rather than one
-  folder. It is still only ever your own OAuth client; the plugin ships none and no
-  one else's app holds the permission.
+  The narrower `drive.file` scope only sees files the app itself created or opened,
+  so it cannot see a folder someone shared with you, nor files a collaborator adds
+  to it later, and the Google Picker that would widen it file by file does not run
+  inside Obsidian on iOS. Full Drive is a Google *restricted* scope. The cost is the
+  blast radius: a leaked refresh token, or a setup token leaked together with its
+  code, can reach your whole Drive rather than one folder. It is still only ever
+  your own OAuth client; the plugin ships none and no one else's app holds the
+  permission.
 - **Identity:** your vault's folder tree is mirrored as real Drive folders, so the
   remote copy is browsable in drive.google.com.
 - **Comparison:** content hashes (Drive's `md5Checksum`), not timestamps.
@@ -62,39 +63,37 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
    No redirect URI needs registering: Desktop-app clients accept any
    `http://127.0.0.1:<port>` loopback, and the plugin picks a free port at runtime.
 
-### 2. Mac
+### 2. Desktop
 
 1. Install the plugin (see below) and enable it.
 2. Paste the client ID and client secret into the plugin settings.
 3. Click **Sign in**. Your browser opens; approve access and return to Obsidian.
 4. The vault syncs to a Drive folder named after your vault.
 
-**Upgrading from 0.2.x.** After updating, click **Sign in again** on the Mac to grant
-full Drive access, then copy a new setup token to the phone. Until you do, the old
-sign-in keeps syncing the plugin's own folder as before; it just cannot reach a
-shared folder.
+Every desktop signs in this way. To link a phone, you need one desktop that is
+already signed in.
 
-### 3. iPhone
+### 3. Mobile
 
-iOS cannot complete an OAuth sign-in. There is no way around this: Google rejects
-`obsidian://` redirect URIs for every client type, and iOS cannot open the loopback
-listener that the desktop flow uses. So the credentials travel from the Mac instead.
+A phone cannot complete an OAuth sign-in. There is no way around this: Google rejects
+`obsidian://` redirect URIs for every client type, and the mobile app cannot open the
+loopback listener that the desktop flow uses. So the credentials travel from a signed-in
+desktop instead. These steps are tested on iOS; Android has not been tested yet.
 
-1. On the Mac: settings → **Copy setup token** → **Copy token**. Only after the token
-   is on the clipboard does the window show a one-time code such as `K7Q4-ZP9M`.
-   Leave that window open.
-2. Get the token to your phone (Universal Clipboard or AirDrop). It is encrypted, so
-   it is useless without the code, but there is no reason to post it anywhere.
-3. On the iPhone: install and enable the plugin, then settings → **Paste setup
+1. On the desktop: settings → **Copy setup token** → **Copy token**. Only after the
+   token is on the clipboard does the window show a one-time code such as
+   `K7Q4-ZP9M`. Leave that window open.
+2. Get the token to your phone any way you like, such as Universal Clipboard,
+   AirDrop or a note to yourself. It is encrypted, so it is useless without the code,
+   but there is no reason to post it anywhere.
+3. On the phone: install and enable the plugin, then settings → **Paste setup
    token**. Paste the token into box 1, type the code into box 2 (case, spaces and
-   dashes don't matter), and tap **Link this device**. The plugin checks the sign-in with Google, saves
-   it, and runs a first sync. A mistyped code just asks you to type it again.
+   dashes don't matter), and tap **Link this device**. The plugin checks the sign-in
+   with Google, saves it, and runs a first sync. A mistyped code just asks you to
+   type it again.
 
 After this the phone is a full peer — it refreshes its own access tokens directly
 against Google. It just could not do the initial handshake.
-
-Both devices must run version 0.2.0 or later: older versions cannot read the
-encrypted token, and the new version refuses the old unencrypted kind.
 
 ### Syncing a shared folder
 
@@ -102,7 +101,7 @@ To sync with a folder someone shared with you, or any other folder in your Drive
 
 1. Open the folder on drive.google.com and copy its link from the address bar (the
    folder ID on its own works too).
-2. On the Mac, paste it into **Drive folder link or ID** in the plugin settings.
+2. On the desktop, paste it into **Drive folder link or ID** in the plugin settings.
 3. Check that `Linked to "<name>"` appears under the field with the folder's name.
 4. Click **Sync now**.
 5. Copy a new setup token to the phone and link it again as above. The token carries
@@ -119,32 +118,18 @@ Notes:
   fresh one.
 - Folders in Shared Drives work too.
 
-### Updating the plugin on the iPhone
-
-Without BRAT, updating the phone means replacing its vault folder, which also
-replaces this plugin's settings file, so the phone has to be linked again:
-
-1. Update the Mac first and restart Obsidian on it once.
-2. Copy a folder that contains only the plugin
-   (`.obsidian/plugins/gdrive-vault-sync/` with `main.js`, `manifest.json` and
-   `styles.css`, plus `.obsidian/community-plugins.json`) onto the phone. Never copy
-   the Mac's own vault folder: until Obsidian has been restarted twice after an update
-   its settings file can still hold the old plaintext sign-in.
-3. Link again with a new setup token and code, as above. Your notes come back down
-   from Drive; nothing is deleted.
-
-The previous sign-in stays behind in Obsidian's app storage on the phone, outside the
-vault. Obsidian offers no way to delete it, and the plugin never reads it again.
-
 ## Installing
 
 Requires Obsidian 1.11.4 or later (for its secure storage) on every device.
 
-**From a release (recommended).** Install
-[BRAT](https://github.com/TfTHacker/obsidian42-brat), then *Add beta plugin* →
-`hyunho058/obsidian-google-drive-sync`. BRAT pulls `main.js`, `manifest.json` and `styles.css` from
-the latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
-and keeps them updated. This works the same on Mac and iPhone.
+**From Community plugins (recommended).** In Obsidian, open Settings → Community
+plugins → Browse, search for **Vault Sync for Google Drive**, then install and enable
+it. Obsidian keeps it updated on every device.
+
+**From a release.** Download `main.js`, `manifest.json` and `styles.css` from the
+latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
+into `.obsidian/plugins/gdrive-vault-sync/` in your vault, then enable it under
+Settings → Community plugins.
 
 **From source.** Copy the build into your vault:
 
@@ -157,8 +142,8 @@ mkdir -p "$PLUGIN"
 cp main.js manifest.json styles.css "$PLUGIN/"
 ```
 
-Then enable it under Settings → Community plugins. On iOS without BRAT, put the same
-files in the vault's plugin folder via the Files app.
+Then enable it under Settings → Community plugins. On a phone, put the same files in
+the vault's plugin folder, for example via the Files app on iOS.
 
 ## Conflicts
 
@@ -196,14 +181,9 @@ Obsidian's secure storage (`SecretStorage`, Obsidian 1.11.4 and later): per devi
 outside the vault folder, so copying, backing up or syncing the vault never carries
 them. Obsidian does not document whether that storage is encrypted on disk, so treat
 it as "out of the vault", not as "encrypted". It is also shared with other installed
-plugins, which could already read this plugin's settings file before. The client ID
+plugins, which can read this plugin's settings file as well. The client ID
 is not a secret and stays in `data.json`. Anyone who gets the refresh token has access
 to your whole Google Drive; revoke it at <https://myaccount.google.com/permissions>.
-
-Older versions kept these secrets in plaintext in `data.json`. Updating moves them in
-two steps: the first start copies them into secure storage, and the next start
-removes them from `data.json` once it finds them stored. Until then the old copy is
-still used, so sync never stops.
 
 This plugin's folder is permanently excluded from sync anyway, resolved from its
 actual install directory at runtime rather than a hardcoded name.
@@ -214,8 +194,7 @@ device's screen and never goes to the clipboard, so a token left in clipboard hi
 or a message is useless on its own. Trying every code against a leaked token takes
 roughly two years on one high-end GPU, less with more GPUs. Tokens do not expire: if
 one leaks together with its code, revoke access at
-<https://myaccount.google.com/permissions> and link again. Old unencrypted tokens
-(`gdvs1:`) are refused.
+<https://myaccount.google.com/permissions> and link again.
 
 **Remote filenames are untrusted input.** Google Drive is not a path-based store, and a
 file's `name` may contain `/`, `..` or control characters. Those names become vault
@@ -256,10 +235,11 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
   folder, deleting such a file here does not remove it from Drive; the next sync
   brings it back. Ask its owner to delete it.
 - **A view-only folder is refused.** Sync needs edit access to the folder.
-- **Both devices must run version 1.0.0 or later.** Older versions list your entire
-  Drive under the new permission instead of only the synced folder.
-- **No background sync on iOS.** Apple suspends the app, so sync runs on launch, on
-  returning to the foreground, after an idle delay following an edit, and on demand.
+- **Android is untested.** It is expected to behave like iOS, with the setup token
+  for linking. Reports are welcome.
+- **No background sync on mobile.** The phone suspends the app, so sync runs on
+  launch, on returning to the foreground, after an idle delay following an edit, and
+  on demand.
 - **Renames re-upload.** A file's identity is its path, so renaming a large
   attachment costs a fresh upload.
 - **Case collisions.** APFS is case-insensitive and Drive is not. If `Note.md` and
@@ -280,8 +260,6 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 | "This device's sign-in is missing" | Obsidian's app storage was cleared (e.g. a reinstall). Notes are untouched; sign in again on desktop, or paste a new setup token on the phone. |
 | "That looks like the code" | The code went into the token box. Paste the setup token into box 1 and type the code into box 2. |
 | "That code doesn't match this token" | The code was mistyped, or it belongs to a different copy. Type it again, or copy a new token. |
-| "This is an old, unencrypted setup token" | The copying device runs a version before 0.2.0. Update it and copy a new token. |
-
 Skipped files, unusable names and conflict copies are named in the developer console
 by default. Turn on **Verbose logging** in Advanced for per-file detail of every sync.
 
@@ -302,13 +280,17 @@ grep -oE 'require\("[a-z_]+"\)' main.js | sort -u   # expect only require("obsid
 
 ### Releasing
 
+Changes reach `main` through pull requests. After the version bump is merged, tag the
+merge commit on `main` and push the tag:
+
 ```bash
 npm version patch   # or minor / major
-git push --follow-tags
+git push origin main
+git push origin <version>
 ```
 
 `npm version` bumps `package.json`, copies the version into `manifest.json`, records it
-in `versions.json`, commits, and creates a bare tag like `0.1.1` (no `v` — Obsidian
+in `versions.json`, commits, and creates a bare tag like `1.0.1` (no `v` — Obsidian
 requires that). Pushing the tag runs `.github/workflows/release.yml`, which checks that
 the tag matches the manifest, runs the tests, builds, checks the bundle for Node
 builtins, and publishes a GitHub release with `main.js`, `manifest.json` and `styles.css` attached.
