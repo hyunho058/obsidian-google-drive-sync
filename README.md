@@ -21,9 +21,15 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
 
 ## How it works
 
-- **Scope:** `drive.file` only. The plugin can see the files it created and nothing
-  else in your Drive. This is a *non-sensitive* scope, so it needs no Google
-  verification review and no paid CASA security assessment.
+- **Scope:** full Google Drive access (`https://www.googleapis.com/auth/drive`).
+  Up to version 0.2.x the plugin used to request `drive.file`, which only sees files
+  the app itself created or opened. That could not see a folder someone shared with
+  you, nor files a collaborator adds to it later, and the Google Picker that would
+  widen it file by file does not run inside Obsidian on iOS. Full Drive is a Google *restricted*
+  scope. The cost is the blast radius: a leaked refresh token, or a setup token
+  leaked together with its code, can now reach your whole Drive rather than one
+  folder. It is still only ever your own OAuth client; the plugin ships none and no
+  one else's app holds the permission.
 - **Identity:** your vault's folder tree is mirrored as real Drive folders, so the
   remote copy is browsable in drive.google.com.
 - **Comparison:** content hashes (Drive's `md5Checksum`), not timestamps.
@@ -42,8 +48,14 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
 
    This step is not optional. A consent screen left in `Testing` issues refresh
    tokens that **expire after exactly 7 days**, and sync will die with an
-   `invalid_grant` error a week after it starts working. Because `drive.file` is a
-   non-sensitive scope, publishing goes through immediately with no review.
+   `invalid_grant` error a week after it starts working.
+
+   Your client is not verified by Google, and it does not need to be. On the first
+   sign-in Google shows "Google hasn't verified this app". Choose **Advanced → Go to
+   <app name> (unsafe)** to continue; that is expected for a client only you use.
+   Verification and the 100-user cap only matter if you share your client ID with
+   many people. If Google blocks the sign-in outright instead of warning, that is
+   decided on Google's side and nothing in the plugin can change it.
 5. **Credentials → Create credentials → OAuth client ID → Application type:
    Desktop app.** Copy the client ID and client secret.
 
@@ -56,6 +68,11 @@ Built for a Mac + iPhone pair, which is the combination that shapes most of the 
 2. Paste the client ID and client secret into the plugin settings.
 3. Click **Sign in**. Your browser opens; approve access and return to Obsidian.
 4. The vault syncs to a Drive folder named after your vault.
+
+**Upgrading from 0.2.x.** After updating, click **Sign in again** on the Mac to grant
+full Drive access, then copy a new setup token to the phone. Until you do, the old
+sign-in keeps syncing the plugin's own folder as before; it just cannot reach a
+shared folder.
 
 ### 3. iPhone
 
@@ -78,6 +95,29 @@ against Google. It just could not do the initial handshake.
 
 Both devices must run version 0.2.0 or later: older versions cannot read the
 encrypted token, and the new version refuses the old unencrypted kind.
+
+### Syncing a shared folder
+
+To sync with a folder someone shared with you, or any other folder in your Drive:
+
+1. Open the folder on drive.google.com and copy its link from the address bar (the
+   folder ID on its own works too).
+2. On the Mac, paste it into **Drive folder link or ID** in the plugin settings.
+3. Check that `Linked to "<name>"` appears under the field with the folder's name.
+4. Click **Sync now**.
+5. Copy a new setup token to the phone and link it again as above. The token carries
+   the folder, so the phone syncs the same one.
+
+Notes:
+
+- You need edit access. A folder you can only view is refused, since sync writes
+  both ways.
+- Clearing the field goes back to the folder named in **Drive folder name**.
+- Pasting the link of a folder the plugin created earlier keeps using that folder.
+  This is how to keep your old folder after recreating your OAuth client: a new
+  client cannot recognise the old folder by name, so it would otherwise create a
+  fresh one.
+- Folders in Shared Drives work too.
 
 ### Updating the plugin on the iPhone
 
@@ -158,7 +198,7 @@ them. Obsidian does not document whether that storage is encrypted on disk, so t
 it as "out of the vault", not as "encrypted". It is also shared with other installed
 plugins, which could already read this plugin's settings file before. The client ID
 is not a secret and stays in `data.json`. Anyone who gets the refresh token has access
-to the Drive folder; revoke it at <https://myaccount.google.com/permissions>.
+to your whole Google Drive; revoke it at <https://myaccount.google.com/permissions>.
 
 Older versions kept these secrets in plaintext in `data.json`. Updating moves them in
 two steps: the first start copies them into secure storage, and the next start
@@ -209,9 +249,15 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 
 ## Known limits
 
-- **`drive.file` cannot see files it did not create.** A file you upload by hand to
-  the Drive folder through drive.google.com is invisible to the plugin. Add files
-  through Obsidian.
+- **Google Docs, Sheets and Slides are skipped.** These files (and Drive shortcuts)
+  have no file content to download, so sync leaves them alone in Drive. A notice counts
+  them as skipped, and the developer console names each one once per session.
+- **Files owned by someone else cannot be deleted from Drive by you.** In a shared
+  folder, deleting such a file here does not remove it from Drive; the next sync
+  brings it back. Ask its owner to delete it.
+- **A view-only folder is refused.** Sync needs edit access to the folder.
+- **Both devices must run version 1.0.0 or later.** Older versions list your entire
+  Drive under the new permission instead of only the synced folder.
 - **No background sync on iOS.** Apple suspends the app, so sync runs on launch, on
   returning to the foreground, after an idle delay following an edit, and on demand.
 - **Renames re-upload.** A file's identity is its path, so renaming a large

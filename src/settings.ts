@@ -1,3 +1,4 @@
+import type { LinkPayload } from "./auth/setup-token";
 import { SyncIndex, emptyIndex } from "./sync/state";
 
 export interface Settings {
@@ -22,6 +23,18 @@ export interface Settings {
 
   rootFolderName: string;
   rootFolderId: string;
+  /**
+   * The folder link or ID as the user typed it, so the field redisplays their
+   * input. Non-empty means the root is pinned to a folder chosen by link and
+   * `rootFolderName` is not in use.
+   */
+  rootFolderLink: string;
+  /**
+   * The pinned folder's name as Google reported it. Empty while a pin has not
+   * been verified yet, which is how a later failure tells "never reachable"
+   * apart from "was reachable and is now gone".
+   */
+  rootFolderLinkName: string;
 
   deviceName: string;
 
@@ -72,6 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
   linked: false,
   rootFolderName: "",
   rootFolderId: "",
+  rootFolderLink: "",
+  rootFolderLinkName: "",
   deviceName: "",
   exclude: [],
   syncConfigFolder: false,
@@ -107,4 +122,23 @@ export function effectiveExcludes(s: Settings, pluginDir: string, configDir: str
   const base = [...hardExcludes(configDir), ...s.exclude, `${pluginDir}/`];
   if (!s.syncConfigFolder) base.push(`${configDir}/`);
   return base;
+}
+
+/**
+ * Applies the folder a setup token carries. The root fields are overwritten even
+ * when the token leaves them out: a device re-linked from one that is not
+ * pinned must stop syncing into the old pinned folder. The name keeps its
+ * keep-if-absent rule, because an empty name would only be refilled with the
+ * vault name at the next load.
+ */
+export function applyLinkedFolder(
+  settings: Settings,
+  payload: LinkPayload,
+): void {
+  settings.rootFolderId = payload.folderId || "";
+  settings.rootFolderLink = payload.folderLink || "";
+  settings.rootFolderLinkName = payload.folderLinkName || "";
+  if (typeof payload.folderName === "string" && payload.folderName.length > 0) {
+    settings.rootFolderName = payload.folderName;
+  }
 }

@@ -1,6 +1,8 @@
 import { requestUrl } from "obsidian";
 
-export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+// Full Drive instead of drive.file: a folder shared by someone else, and files collaborators
+// add to it later, were never created or opened by this app, so drive.file can't see them.
+export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 export const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 export const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 
@@ -28,6 +30,8 @@ interface TokenResponse {
   access_token: string;
   expires_in: number;
   refresh_token?: string;
+  /** Space-separated scopes this token carries; Google sends it on refresh grants too. */
+  scope?: string;
 }
 
 async function postToken(params: Record<string, string>): Promise<TokenResponse> {
@@ -177,12 +181,27 @@ export class TokenManager {
   private accessToken: string | null = null;
   private expiresAt = 0;
   private inFlight: Promise<string> | null = null;
+  // Read from Google's answer rather than saved at sign-in, so a sign-in made before 1.0.0,
+  // which used to request drive.file, is recognised too.
+  private grantedScope: string | null = null;
 
   constructor(private credentials: () => Credentials | null) {}
 
   invalidate(): void {
     this.accessToken = null;
     this.expiresAt = 0;
+    // A new sign-in may carry a different scope; don't let the old one's answer linger.
+    this.grantedScope = null;
+  }
+
+  /**
+   * Whether the current sign-in can see the whole Drive. `null` means unknown: no token
+   * fetched since the last `invalidate()`, or Google's answer named no scope.
+   */
+  hasFullDrive(): boolean | null {
+    if (this.grantedScope === null) return null;
+    // Exact match: "drive.file" and "drive.readonly" share the prefix but can't see shared folders.
+    return this.grantedScope.split(/\s+/).includes(DRIVE_SCOPE);
   }
 
   async getAccessToken(): Promise<string> {
@@ -209,6 +228,7 @@ export class TokenManager {
     });
 
     this.accessToken = tokens.access_token;
+    this.grantedScope = tokens.scope ?? null;
     // Refresh a minute early so a request never races the expiry.
     this.expiresAt = Date.now() + Math.max(0, tokens.expires_in - 60) * 1000;
     return this.accessToken;
