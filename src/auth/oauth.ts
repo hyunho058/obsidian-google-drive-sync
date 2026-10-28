@@ -181,7 +181,7 @@ export class TokenManager {
   private accessToken: string | null = null;
   private expiresAt = 0;
   private inFlight: Promise<string> | null = null;
-  // Read from Google's answer rather than saved at sign-in, so a sign-in made before 0.3.0,
+  // Read from Google's answer rather than saved at sign-in, so a sign-in made before 1.0.0,
   // which used to request drive.file, is recognised too.
   private grantedScope: string | null = null;
 

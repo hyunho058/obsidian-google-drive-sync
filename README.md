@@ -256,7 +256,7 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
   folder, deleting such a file here does not remove it from Drive; the next sync
   brings it back. Ask its owner to delete it.
 - **A view-only folder is refused.** Sync needs edit access to the folder.
-- **Both devices must run version 0.3.0 or later.** Older versions list your entire
+- **Both devices must run version 1.0.0 or later.** Older versions list your entire
   Drive under the new permission instead of only the synced folder.
 - **No background sync on iOS.** Apple suspends the app, so sync runs on launch, on
   returning to the foreground, after an idle delay following an edit, and on demand.

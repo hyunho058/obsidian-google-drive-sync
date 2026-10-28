@@ -164,7 +164,7 @@ Status legend: `resolved (request)` = settled by the user's own request; `resolv
 
 ### D21: README and settings copy describe the new scope honestly and the new limits
 - **Status**: assumed (the request names the verification consequence; the wording is the agent's)
-- **Rationale**: README "How it works → Scope" says the plugin asks for full Google Drive access (`drive`), why (`drive.file` cannot see folders shared with you; the Picker does not run on iOS), that this is a Google *restricted* scope, and what a leaked refresh token could reach. The Cloud setup section replaces "publishing goes through immediately with no review" with: the consent screen still must be In production; on the first sign-in Google shows "Google hasn't verified this app" — choose Advanced → Go to <app name> (unsafe), which is expected for a client only you use; the 100-user cap and verification apply only if you share your client ID with many people. Setup gains a "Syncing a shared folder" subsection (paste link on Mac → name appears → Sync now → copy a new setup token to the phone), which also says that pasting the link of a folder the plugin created earlier keeps using it — the way to keep an old folder after recreating the OAuth client (D22). Known limits: replace the `drive.file` limit with "Google Docs, Sheets and Slides are skipped", "Files owned by someone else cannot be deleted from Drive by you; a delete here brings them back", "A view-only folder is refused", and "Both devices must run version 0.3.0 or later: older versions list your entire Drive under the new permission". `src/ui/settings-tab.ts:68` loses the non-sensitive claim and gains the unverified-app sentence. Rejected: leaving verification unmentioned (the user hits the warning screen on the first sign-in and would think something broke).
+- **Rationale**: README "How it works → Scope" says the plugin asks for full Google Drive access (`drive`), why (`drive.file` cannot see folders shared with you; the Picker does not run on iOS), that this is a Google *restricted* scope, and what a leaked refresh token could reach. The Cloud setup section replaces "publishing goes through immediately with no review" with: the consent screen still must be In production; on the first sign-in Google shows "Google hasn't verified this app" — choose Advanced → Go to <app name> (unsafe), which is expected for a client only you use; the 100-user cap and verification apply only if you share your client ID with many people. Setup gains a "Syncing a shared folder" subsection (paste link on Mac → name appears → Sync now → copy a new setup token to the phone), which also says that pasting the link of a folder the plugin created earlier keeps using it — the way to keep an old folder after recreating the OAuth client (D22). Known limits: replace the `drive.file` limit with "Google Docs, Sheets and Slides are skipped", "Files owned by someone else cannot be deleted from Drive by you; a delete here brings them back", "A view-only folder is refused", and "Both devices must run version 1.0.0 or later: older versions list your entire Drive under the new permission". `src/ui/settings-tab.ts:68` loses the non-sensitive claim and gains the unverified-app sentence. Rejected: leaving verification unmentioned (the user hits the warning screen on the first sign-in and would think something broke).
 
 ### D22: The name-based search only finds folders this plugin created
 - **Status**: assumed (found by the L2 review: under full `drive` the old query matches any My Drive folder with the vault's name)
@@ -178,7 +178,7 @@ Status legend: `resolved (request)` = settled by the user's own request; `resolv
 - Tests run offline through `tests/obsidian-stub.ts`; no test may call Google.
 - The folder ID, link and names are never written to the console at `warn`/`error` level inside the auth modules; tokens and secrets are never logged anywhere (unchanged rule).
 - All work stays on `feat/full-drive-scope`; nothing is pushed, tagged or released by this run. `manifest.json` / `versions.json` are not bumped (release step).
-- README text refers to the next release as 0.3.0 (assumed numbering; the release commit confirms it).
+- README text refers to the next release as 1.0.0 (the user chose 1.0.0 for this release on 2026-10-26).
 
 ## Known Gaps
 - Google behaviour to confirm by the user at the first sign-in (manual): the exact unverified-app screen for a restricted scope on an In-production, unverified client, and that the refresh token issued there does not expire after 7 days. If Google blocks the sign-in outright instead of warning, the only remedies are outside this plugin (verification, or an Internal-type Workspace client).
@@ -473,13 +473,13 @@ Composite 1.00 (threshold 0.80; every dimension ≥ 0.60). Unknown/unknowns: Tie
 
 #### R9.2: README documents the restricted scope, the unverified-app step, and the shared-folder setup
 - **Given**: `README.md`
-- **When**: Running `grep -n "auth/drive\b\|hasn't verified\|Shared folder\|shared folder\|0.3.0" README.md`
+- **When**: Running `grep -n "auth/drive\b\|hasn't verified\|Shared folder\|shared folder\|1.0.0" README.md`
 - **Then**: Hits exist in "How it works", in the Cloud setup section, in a "Syncing a shared folder" subsection and in Known limits
 
 #### R9.3: Known limits list the four new limits
 - **Given**: `README.md` Known limits section
 - **When**: Read
-- **Then**: It names Google Docs/Sheets/Slides being skipped, files owned by others coming back after a delete, view-only folders being refused, and both devices needing 0.3.0 or later; it no longer says `drive.file` cannot see files it did not create
+- **Then**: It names Google Docs/Sheets/Slides being skipped, files owned by others coming back after a delete, view-only folders being refused, and both devices needing 1.0.0 or later; it no longer says `drive.file` cannot see files it did not create
 
 #### R9.4: The settings tab's credentials help names the unverified-app warning (manual)
 - **Given**: A desktop settings tab
@@ -523,7 +523,7 @@ Fence check: no task is marked `Fenced`. The only auth/permission change (the sc
 ### T7: README and settings copy for the new scope and limits [vertical]
 - **Fulfills**: R0 (R0.3), R9
 - **Depends on**: T6, TT9
-- **Files**: `README.md` (D21: "How it works → Scope", Cloud setup step 4 and the unverified-app step, new "Syncing a shared folder" subsection under Setup, Known limits rewritten, "0.3.0 or later" wording), `src/ui/settings-tab.ts:60-70` credentials help text (after T6 so the two edits to that file never run at once).
+- **Files**: `README.md` (D21: "How it works → Scope", Cloud setup step 4 and the unverified-app step, new "Syncing a shared folder" subsection under Setup, Known limits rewritten, "1.0.0 or later" wording), `src/ui/settings-tab.ts:60-70` credentials help text (after T6 so the two edits to that file never run at once).
 
 ### TT1: acceptance tests for R1's GWTs
 - **Fulfills**: R1 (tests)
@@ -581,7 +581,7 @@ Parallelism: TT6 then T3, both independent of T1; T2 ∥ TT1 ∥ TT8 after T1; T
 - On the Mac: build, install, open settings, click **Sign in again**, and note what Google shows for the restricted scope (expected: "Google hasn't verified this app" → Advanced → continue). If Google blocks the sign-in instead, that is the Known Gap and the README's wording must be corrected before release.
 - Paste the shared folder's link, run Sync now (R0.1); copy a new setup token to the iPhone and link it (R0.2, R8.4); check R3.11–R3.15, R5.5, R7.4 and R9.4 by hand.
 - Confirm on the real shared folder whether interval syncs pick up another person's edit within one interval (changes feed) or only within the hour (D5's forced sweep); record the answer in the spec's Known Gaps.
-- Open a PR from `feat/full-drive-scope` to `main` (branch-and-PR rule; nothing is pushed by this run). Release 0.3.0 only after merge, with the usual "Release 0.3.0" commit bumping `manifest.json` and `versions.json`.
+- Open a PR from `feat/full-drive-scope` to `main` (branch-and-PR rule; nothing is pushed by this run). Release 1.0.0 only after merge, with the usual "Release 1.0.0" commit bumping `manifest.json` and `versions.json`.
 
 ## Spec Review
 - **Verdict**: NEEDS_FIX
