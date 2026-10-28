@@ -5,7 +5,7 @@ import { CredentialSaveError } from "../auth/credential-store";
 import { describeError } from "../util/log";
 import { effectiveExcludes } from "../settings";
 import { MSG_ROOT_CHANGED } from "../drive/client";
-import { FolderLinkPlan, MSG_SYNC_RUNNING, parseFolderRef, planFolderLink, rootProblem } from "../drive/folder-ref";
+import { FolderLinkPlan, MSG_SYNC_RUNNING, planFolderLink, rootProblem } from "../drive/folder-ref";
 
 export class GDriveSyncSettingTab extends PluginSettingTab {
   constructor(
@@ -55,7 +55,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
 
     new Setting(root).setName("Google credentials").setHeading();
 
-    const help = root.createEl("div", { cls: "setting-item-description" });
+    const help = root.createDiv({ cls: "setting-item-description" });
     help.createEl("p", {
       text:
         "Create your own OAuth client so no third-party server ever sees your notes. " +
@@ -270,12 +270,13 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
-    const describeName = () =>
+    const describeName = (): void => {
       nameSetting.setDesc(
         this.plugin.settings.rootFolderLink
           ? "Not used while a Drive folder link is set below. Clear the link to sync with this folder again."
           : "Folder created at the root of your Drive. Changing this starts a fresh remote copy.",
       );
+    };
     describeName();
 
     this.renderFolderLink(root, describeName);
@@ -543,7 +544,7 @@ export class GDriveSyncSettingTab extends PluginSettingTab {
       this.plugin.pluginDir(),
       this.app.vault.configDir,
     );
-    root.createEl("div", {
+    root.createDiv({
       cls: "setting-item-description",
       text: `Always excluded: ${auto.join(", ")}`,
     });

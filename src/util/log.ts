@@ -4,7 +4,7 @@ export class Logger {
   constructor(private verbose: () => boolean) {}
 
   debug(...args: unknown[]): void {
-    if (this.verbose()) console.log(PREFIX, ...args);
+    if (this.verbose()) console.debug(PREFIX, ...args);
   }
 
   warn(...args: unknown[]): void {

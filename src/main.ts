@@ -149,7 +149,7 @@ export default class GDriveSyncPlugin extends Plugin {
     const stored = (await this.loadData()) as Partial<Settings> | null;
     // Deep-copied defaults, so the live settings never share an array or object with DEFAULT_SETTINGS.
     const defaults = cloneSettings(DEFAULT_SETTINGS);
-    this.settings = Object.assign(defaults, stored ?? {});
+    this.settings = { ...defaults, ...(stored ?? {}) };
     if (!this.settings.deviceName) this.settings.deviceName = defaultDeviceName();
     if (!this.settings.rootFolderName) this.settings.rootFolderName = this.app.vault.getName();
   }

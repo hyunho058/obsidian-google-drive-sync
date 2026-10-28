@@ -261,7 +261,8 @@ rather than assumed to be `.obsidian`, so a renamed one is excluded the same way
 | "That looks like the code" | The code went into the token box. Paste the setup token into box 1 and type the code into box 2. |
 | "That code doesn't match this token" | The code was mistyped, or it belongs to a different copy. Type it again, or copy a new token. |
 Skipped files, unusable names and conflict copies are named in the developer console
-by default. Turn on **Verbose logging** in Advanced for per-file detail of every sync.
+by default. Turn on **Verbose logging** in Advanced for per-file detail of every sync;
+the console shows it only when its log level includes "Verbose".
 
 ## Development
 
