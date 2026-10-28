@@ -126,11 +126,10 @@ Requires Obsidian 1.11.4 or later (for its secure storage) on every device.
 plugins → Browse, search for **Vault Sync for Google Drive**, then install and enable
 it. Obsidian keeps it updated on every device.
 
-**Beta versions.** Install [BRAT](https://github.com/TfTHacker/obsidian42-brat), then
-*Add beta plugin* → `hyunho058/obsidian-google-drive-sync`. BRAT pulls `main.js`,
-`manifest.json` and `styles.css` from the latest
-[GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
-and keeps them updated.
+**From a release.** Download `main.js`, `manifest.json` and `styles.css` from the
+latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
+into `.obsidian/plugins/gdrive-vault-sync/` in your vault, then enable it under
+Settings → Community plugins.
 
 **From source.** Copy the build into your vault:
 
