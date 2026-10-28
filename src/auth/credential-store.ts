@@ -46,6 +46,7 @@ const LABEL: Record<Field, string> = {
   "refresh-token": "refresh token",
 };
 
+/** The plugin's original id. Kept after the id changed: stored sign-ins are found by it. */
 const ID_PREFIX = "gdrive-vault-sync";
 
 /** 8 lowercase hex digits — satisfies SecretStorage's lowercase/dash id rule. */

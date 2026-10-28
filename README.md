@@ -23,10 +23,10 @@ Android should work the same way as iOS but has not been tested yet.
 ## How it works
 
 - **Scope:** full Google Drive access (`https://www.googleapis.com/auth/drive`).
-  The narrower `drive.file` scope only sees files the app itself created or opened,
-  so it cannot see a folder someone shared with you, nor files a collaborator adds
-  to it later, and the Google Picker that would widen it file by file does not run
-  inside Obsidian on iOS. Full Drive is a Google *restricted* scope. The cost is the
+  The plugin uses it instead of the narrower `drive.file` scope, which only sees
+  files the app itself created or opened. That cannot see a folder someone shared
+  with you, nor files a collaborator adds to it later, and the Google Picker that
+  would widen it file by file does not run inside Obsidian on iOS. Full Drive is a Google *restricted* scope. The cost is the
   blast radius: a leaked refresh token, or a setup token leaked together with its
   code, can reach your whole Drive rather than one folder. It is still only ever
   your own OAuth client; the plugin ships none and no one else's app holds the
@@ -128,7 +128,7 @@ it. Obsidian keeps it updated on every device.
 
 **From a release.** Download `main.js`, `manifest.json` and `styles.css` from the
 latest [GitHub release](https://github.com/hyunho058/obsidian-google-drive-sync/releases)
-into `.obsidian/plugins/gdrive-vault-sync/` in your vault, then enable it under
+into `.obsidian/plugins/vault-sync-for-google-drive/` in your vault, then enable it under
 Settings → Community plugins.
 
 **From source.** Copy the build into your vault:
@@ -137,7 +137,7 @@ Settings → Community plugins.
 npm install
 npm run build
 
-PLUGIN="$HOME/path/to/YourVault/.obsidian/plugins/gdrive-vault-sync"
+PLUGIN="$HOME/path/to/YourVault/.obsidian/plugins/vault-sync-for-google-drive"
 mkdir -p "$PLUGIN"
 cp main.js manifest.json styles.css "$PLUGIN/"
 ```

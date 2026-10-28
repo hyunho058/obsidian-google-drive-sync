@@ -157,10 +157,10 @@ const settingsStub = {
 } as unknown as Parameters<typeof effectiveExcludes>[0];
 
 for (const dir of [
-  ".obsidian/plugins/gdrive-vault-sync",
+  ".obsidian/plugins/vault-sync-for-google-drive",
   ".obsidian/plugins/obsidian-google-drive-sync",
-  ".obsidian/plugins/gdrive-vault-sync-beta",
-  "custom-config/plugins/gdrive-vault-sync",
+  ".obsidian/plugins/vault-sync-for-google-drive-beta",
+  "custom-config/plugins/vault-sync-for-google-drive",
 ]) {
   const f = new PathFilter(effectiveExcludes(settingsStub, dir, dir.split("/")[0]));
   ok(`credentials excluded when installed at ${dir}`, f.excludes(`${dir}/data.json`));
@@ -169,7 +169,7 @@ for (const dir of [
 ok(
   "a sibling plugin's data is not swept up by the rule",
   !new PathFilter(
-    effectiveExcludes(settingsStub, ".obsidian/plugins/gdrive-vault-sync", ".obsidian"),
+    effectiveExcludes(settingsStub, ".obsidian/plugins/vault-sync-for-google-drive", ".obsidian"),
   ).excludes(".obsidian/plugins/other-plugin/data.json"),
 );
 
@@ -179,14 +179,14 @@ ok(
 {
   const off = { exclude: [], syncConfigFolder: false } as unknown as typeof settingsStub;
   const f = new PathFilter(
-    effectiveExcludes(off, ".obsidian-mobile/plugins/gdrive-vault-sync", ".obsidian-mobile"),
+    effectiveExcludes(off, ".obsidian-mobile/plugins/vault-sync-for-google-drive", ".obsidian-mobile"),
   );
   ok("renamed config folder excluded when config sync is off", f.excludes(".obsidian-mobile/plugins/other/data.json"));
   ok("...including its plugin code", f.excludes(".obsidian-mobile/plugins/other/main.js"));
   ok("...without excluding an unrelated .obsidian folder by name", !f.excludes(".obsidian/notes.md"));
 
   const on = new PathFilter(
-    effectiveExcludes(settingsStub, ".obsidian-mobile/plugins/gdrive-vault-sync", ".obsidian-mobile"),
+    effectiveExcludes(settingsStub, ".obsidian-mobile/plugins/vault-sync-for-google-drive", ".obsidian-mobile"),
   );
   ok("renamed config folder's workspace layout always excluded", on.excludes(".obsidian-mobile/workspace.json"));
   ok("renamed config folder syncs when config sync is on", !on.excludes(".obsidian-mobile/app.json"));

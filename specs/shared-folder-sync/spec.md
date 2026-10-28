@@ -473,13 +473,15 @@ Composite 1.00 (threshold 0.80; every dimension ≥ 0.60). Unknown/unknowns: Tie
 
 #### R9.2: README documents the restricted scope, the unverified-app step, and the shared-folder setup
 - **Given**: `README.md`
-- **When**: Running `grep -n "auth/drive\b\|hasn't verified\|Shared folder\|shared folder\|1.0.0" README.md`
-- **Then**: Hits exist in "How it works", in the Cloud setup section, in a "Syncing a shared folder" subsection and in Known limits
+- **When**: Running `grep -n "auth/drive\b\|hasn't verified\|Shared folder\|shared folder" README.md`
+- **Then**: Hits exist in "How it works", in the Cloud setup section and in a "Syncing a shared folder" subsection
 
-#### R9.3: Known limits list the four new limits
+#### R9.3: Known limits list the new limits
 - **Given**: `README.md` Known limits section
 - **When**: Read
-- **Then**: It names Google Docs/Sheets/Slides being skipped, files owned by others coming back after a delete, view-only folders being refused, and both devices needing 1.0.0 or later; it no longer says `drive.file` cannot see files it did not create
+- **Then**: It names Google Docs/Sheets/Slides being skipped, files owned by others coming back after a delete, and view-only folders being refused; it no longer says `drive.file` cannot see files it did not create
+
+Amended 2026-10-28: R9.2 and R9.3 no longer require "both devices need 1.0.0 or later". The README was rewritten for the community plugin directory (PR #3), where no user ever ran a 0.x version, so the limit was dropped.
 
 #### R9.4: The settings tab's credentials help names the unverified-app warning (manual)
 - **Given**: A desktop settings tab

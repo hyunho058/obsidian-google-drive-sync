@@ -102,11 +102,6 @@ test("R9.2 a 'Syncing a shared folder' heading exists", () => {
   assert(found, "README has no '## / ### Syncing a shared folder' heading");
 });
 
-test("R9.2 'Known limits' mentions 1.0.0", () => {
-  const s = section(readme(), /^known limits\b/i, "Known limits");
-  assert(/1\.0\.0/.test(s.body), "'Known limits' does not mention 1.0.0");
-});
-
 // ── R9.3 ────────────────────────────────────────────────────────────────────
 
 function knownLimits(): string {
@@ -135,14 +130,6 @@ test("R9.3 Known limits: a view-only folder is refused", () => {
   assert(
     /(view-?only|read-?only|viewer)/i.test(body) && /(refuse|reject|not (be )?(allowed|accepted)|won['’]t)/i.test(body),
     "Known limits does not say a view-only folder is refused",
-  );
-});
-
-test("R9.3 Known limits: both devices need 1.0.0 or later", () => {
-  const body = knownLimits();
-  assert(
-    /1\.0\.0 (or later|or newer|or above|\+)|1\.0\.0\+|at least 1\.0\.0/i.test(body),
-    "Known limits does not say devices need 1.0.0 or later",
   );
 });
 
