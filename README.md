@@ -54,14 +54,16 @@ your devices use the same key.
    fine, for example "Obsidian Sync".
 2. In the menu, open **APIs & Services → Library**, search for **Google Drive API**,
    and click **Enable**.
-3. Open **APIs & Services → OAuth consent screen**. Choose **External**, then fill in
-   an app name and your email address where asked.
+3. Open **APIs & Services → OAuth consent screen** (or **Google Auth Platform →
+   Audience**). Choose **External**, then fill in an app name and your email address
+   where asked.
 4. **Set the publishing status to `In production`.** Don't skip this. If it stays
    in `Testing`, Google signs you out after exactly 7 days and sync stops with an
    `invalid_grant` error.
-5. Open **Credentials → Create credentials → OAuth client ID**, and choose
-   **Desktop app** as the application type. Google then shows a **client ID** and a
-   **client secret**. Keep this page open; you need both in the next step.
+5. Open **Credentials → Create credentials → OAuth client ID** (or **Google Auth
+   Platform → Clients → Create client**), and choose **Desktop app** as the
+   application type. Google then shows a **client ID** and a **client secret**. Keep
+   this page open; you need both in the next step.
 
 > **"Google hasn't verified this app"** — when you sign in for the first time,
 > Google shows this warning. That's normal, because the "app" is the key you just
@@ -84,9 +86,9 @@ If you have more than one computer, repeat this step on each one.
 Phones can't use Google's sign-in page for this kind of key, so you send the sign-in
 from your computer to your phone instead. It's like scanning a code to log in.
 
-1. **On the computer:** in the plugin settings, click **Copy setup token**, then
-   **Copy token**. A short one-time code appears, such as `K7Q4-ZP9M`. Leave that
-   window open.
+1. **On the computer:** in the plugin settings, next to **Copy setup token**, click
+   **Copy**, then **Copy token**. A short one-time code appears, such as `K7Q4-ZP9M`.
+   Leave that window open.
 2. **Send the token to your phone** any way you like: AirDrop, Universal Clipboard,
    or a note to yourself. The token is locked, so it's useless without the code. Still,
    don't post it anywhere public.
@@ -130,7 +132,8 @@ You can sync with a folder someone shared with you, or any other folder in your 
 2. On your computer, paste it into **Drive folder link or ID** in the plugin settings.
 3. Check that `Linked to "<folder name>"` appears under the box.
 4. Click **Sync now**.
-5. Link your phone again (step 4) with a new setup token, so it uses the same folder.
+5. Link your phone again (step 4, tapping **Paste new token** on the phone) with a new
+   setup token, so it uses the same folder.
 
 Good to know:
 
@@ -179,7 +182,7 @@ its access at <https://myaccount.google.com/permissions>, then sign in again.
 |---|---|
 | `invalid_grant` about a week after setup | Your Google project is still in `Testing`. Set it to `In production` (step 2.4) and sign in again. |
 | "Google returned no refresh token" | Remove the app at <https://myaccount.google.com/permissions> and sign in again. |
-| Sync stopped with a deletion warning | The safety check found many deleted files. Look at both your vault and Drive. If you really meant to delete them, run **Reset sync state**. |
+| Sync stopped with a deletion warning | The safety check found many deleted files. Look at both your vault and Drive. If you really meant to delete them, click **Reset** next to **Reset sync state** (under **Advanced**). |
 | "This device's sign-in is missing" | Obsidian's storage was cleared, for example after reinstalling. Your notes are fine. Sign in again on a computer, or paste a new setup token on a phone. |
 | "That looks like the code" | You typed the code into the token box. Paste the token into box 1 and type the code into box 2. |
 | "That code doesn't match this token" | The code was mistyped, or it's from a different token. Type it again, or copy a new token. |
